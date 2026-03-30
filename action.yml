@@ -1,0 +1,136 @@
+name: "Kapi Run"
+description: "Run kapi localization commands and commit results"
+
+inputs:
+  command:
+    description: "Kapi subcommand to execute"
+    required: false
+    default: "run"
+  args:
+    description: "Additional arguments"
+    required: false
+    default: ""
+  project:
+    description: "Path to .kapi project file (-p flag)"
+    required: false
+    default: ""
+  commit:
+    description: "Whether to commit translation changes"
+    required: false
+    default: "true"
+  commit-message:
+    description: "Commit message"
+    required: false
+    default: "chore: update translations via kapi"
+  git-user-name:
+    description: "Git committer name"
+    required: false
+    default: "Kapi Bot"
+  git-user-email:
+    description: "Git committer email"
+    required: false
+    default: "bot@kapi.dev"
+  paths:
+    description: "Space-separated paths to stage for commit"
+    required: false
+    default: ""
+
+outputs:
+  status:
+    description: "Run result: success, no-changes, or failed"
+    value: ${{ steps.set-outputs.outputs.status }}
+  committed:
+    description: "Whether a commit was created"
+    value: ${{ steps.set-outputs.outputs.committed }}
+  commit-sha:
+    description: "SHA of the created commit (empty if no commit)"
+    value: ${{ steps.set-outputs.outputs.commit-sha }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run kapi
+      id: run-kapi
+      shell: bash
+      run: |
+        CMD="kapi ${{ inputs.command }}"
+        if [ -n "${{ inputs.project }}" ]; then
+          CMD="$CMD -p ${{ inputs.project }}"
+        fi
+        if [ -n "${{ inputs.args }}" ]; then
+          CMD="$CMD ${{ inputs.args }}"
+        fi
+        echo "Running: $CMD"
+        if eval "$CMD"; then
+          echo "run_status=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "run_status=failed" >> "$GITHUB_OUTPUT"
+          echo "::error::kapi ${{ inputs.command }} failed"
+          exit 1
+        fi
+
+    - name: Check for changes
+      id: check-changes
+      shell: bash
+      run: |
+        PATHS="${{ inputs.paths }}"
+        if [ -z "$PATHS" ]; then
+          # No paths specified — check entire working tree
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          EXISTING_PATHS=""
+          for p in $PATHS; do
+            if [ -e "$p" ]; then
+              EXISTING_PATHS="$EXISTING_PATHS $p"
+            fi
+          done
+          if [ -z "$EXISTING_PATHS" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet -- $EXISTING_PATHS && git diff --cached --quiet -- $EXISTING_PATHS; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+        fi
+
+    - name: Commit changes
+      id: commit
+      if: inputs.commit == 'true' && steps.check-changes.outputs.has_changes == 'true'
+      shell: bash
+      run: |
+        git config user.name "${{ inputs.git-user-name }}"
+        git config user.email "${{ inputs.git-user-email }}"
+        PATHS="${{ inputs.paths }}"
+        if [ -z "$PATHS" ]; then
+          git add -A
+        else
+          for p in $PATHS; do
+            if [ -e "$p" ]; then
+              git add "$p"
+            fi
+          done
+        fi
+        git commit -m "${{ inputs.commit-message }}"
+        git push
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: Set outputs
+      id: set-outputs
+      shell: bash
+      run: |
+        if [ "${{ steps.check-changes.outputs.has_changes }}" == "true" ]; then
+          echo "status=success" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=no-changes" >> "$GITHUB_OUTPUT"
+        fi
+        if [ "${{ steps.commit.outcome }}" == "success" ]; then
+          echo "committed=true" >> "$GITHUB_OUTPUT"
+          echo "commit-sha=${{ steps.commit.outputs.sha }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "committed=false" >> "$GITHUB_OUTPUT"
+          echo "commit-sha=" >> "$GITHUB_OUTPUT"
+        fi
