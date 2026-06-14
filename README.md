@@ -4,7 +4,7 @@ A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) localizatio
 
 ## Prerequisites
 
-This action requires the `kapi` CLI to be installed. Use [`neokapi/setup-bowrain@v1`](https://github.com/neokapi/setup-bowrain) to install it, or add it to `PATH` yourself.
+This action requires the `kapi` CLI to be installed. Use [`neokapi/setup-kapi@v1`](https://github.com/neokapi/setup-kapi) to install it, or add it to `PATH` yourself.
 
 ## Usage
 
@@ -26,9 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: neokapi/setup-bowrain@v1
-        with:
-          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+      - uses: neokapi/setup-kapi@v1
 
       - uses: neokapi/kapi-action@v1
         with:
