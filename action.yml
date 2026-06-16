@@ -52,28 +52,38 @@ runs:
     - name: Run kapi
       id: run-kapi
       shell: bash
+      # Inputs cross into the step as env vars (data), never interpolated into
+      # the script source — so shell metacharacters in an input can't execute.
+      # The command is built as an argv array and exec'd directly (no eval).
+      env:
+        COMMAND: ${{ inputs.command }}
+        ARGS: ${{ inputs.args }}
+        PROJECT: ${{ inputs.project }}
       run: |
-        CMD="kapi ${{ inputs.command }}"
-        if [ -n "${{ inputs.project }}" ]; then
-          CMD="$CMD -p ${{ inputs.project }}"
+        set -euo pipefail
+        cmd=(kapi "$COMMAND")
+        [ -n "$PROJECT" ] && cmd+=(-p "$PROJECT")
+        # args is a free-form fragment: split on whitespace into argv (no eval,
+        # no globbing of the string as source).
+        if [ -n "$ARGS" ]; then
+          read -ra extra <<< "$ARGS"
+          cmd+=("${extra[@]}")
         fi
-        if [ -n "${{ inputs.args }}" ]; then
-          CMD="$CMD ${{ inputs.args }}"
-        fi
-        echo "Running: $CMD"
-        if eval "$CMD"; then
+        printf 'Running:'; printf ' %q' "${cmd[@]}"; echo
+        if "${cmd[@]}"; then
           echo "run_status=success" >> "$GITHUB_OUTPUT"
         else
           echo "run_status=failed" >> "$GITHUB_OUTPUT"
-          echo "::error::kapi ${{ inputs.command }} failed"
+          echo "::error::kapi ${COMMAND} failed"
           exit 1
         fi
 
     - name: Check for changes
       id: check-changes
       shell: bash
+      env:
+        PATHS: ${{ inputs.paths }}
       run: |
-        PATHS="${{ inputs.paths }}"
         if [ -z "$PATHS" ]; then
           # No paths specified — check entire working tree
           if git diff --quiet && git diff --cached --quiet; then
@@ -101,10 +111,15 @@ runs:
       id: commit
       if: inputs.commit == 'true' && steps.check-changes.outputs.has_changes == 'true'
       shell: bash
+      env:
+        GIT_USER_NAME: ${{ inputs.git-user-name }}
+        GIT_USER_EMAIL: ${{ inputs.git-user-email }}
+        COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        PATHS: ${{ inputs.paths }}
       run: |
-        git config user.name "${{ inputs.git-user-name }}"
-        git config user.email "${{ inputs.git-user-email }}"
-        PATHS="${{ inputs.paths }}"
+        set -euo pipefail
+        git config user.name "$GIT_USER_NAME"
+        git config user.email "$GIT_USER_EMAIL"
         if [ -z "$PATHS" ]; then
           git add -A
         else
@@ -114,7 +129,7 @@ runs:
             fi
           done
         fi
-        git commit -m "${{ inputs.commit-message }}"
+        git commit -m "$COMMIT_MESSAGE"
         git push
         echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
