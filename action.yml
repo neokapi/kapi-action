@@ -5,7 +5,7 @@ inputs:
   command:
     description: "Kapi subcommand to execute"
     required: false
-    default: "run"
+    default: "up"
   args:
     description: "Additional arguments"
     required: false
@@ -14,6 +14,14 @@ inputs:
     description: "Path to .kapi project file (-p flag)"
     required: false
     default: ""
+  fail-on-parked:
+    description: >-
+      With `command: up`, fail the workflow when the run parks (work remains that
+      the loop could not carry to the ship gate). Parked is normal pending work,
+      not a broken run, so the default is to commit what did converge and
+      annotate the rest.
+    required: false
+    default: "false"
   commit:
     description: "Whether to commit translation changes"
     required: false
@@ -39,6 +47,15 @@ outputs:
   status:
     description: "Run result: success, no-changes, or failed"
     value: ${{ steps.set-outputs.outputs.status }}
+  outcome:
+    description: "With `command: up`: `converged` or `parked` (empty for other commands)"
+    value: ${{ steps.run-kapi.outputs.outcome }}
+  passes:
+    description: "With `command: up`: how many reconciliation passes the run took"
+    value: ${{ steps.run-kapi.outputs.passes }}
+  parked-locales:
+    description: "With `command: up`: comma-separated locales still short of their gate"
+    value: ${{ steps.run-kapi.outputs.parked-locales }}
   committed:
     description: "Whether a commit was created"
     value: ${{ steps.set-outputs.outputs.committed }}
@@ -59,6 +76,7 @@ runs:
         COMMAND: ${{ inputs.command }}
         ARGS: ${{ inputs.args }}
         PROJECT: ${{ inputs.project }}
+        FAIL_ON_PARKED: ${{ inputs.fail-on-parked }}
       run: |
         set -euo pipefail
         cmd=(kapi "$COMMAND")
@@ -69,13 +87,74 @@ runs:
           read -ra extra <<< "$ARGS"
           cmd+=("${extra[@]}")
         fi
+
+        # `kapi up` is the convergence verb: in a server-connected project it
+        # pushes, converges on the Bowrain server, and pulls the produced targets
+        # back; with no server it runs the same loop locally. Under --json it is
+        # an NDJSON stream — one convergence event per line, closed by a single
+        # {"type":"result", ...} record. That record is the CI contract; the
+        # events are the log.
+        STREAM=""
+        if [ "$COMMAND" = "up" ]; then
+          case " ${ARGS} " in
+            *" --json "*) ;;               # the caller already asked for it
+            *) cmd+=(--json) ;;
+          esac
+          STREAM="${RUNNER_TEMP}/kapi-up.ndjson"
+        fi
+
         printf 'Running:'; printf ' %q' "${cmd[@]}"; echo
-        if "${cmd[@]}"; then
-          echo "run_status=success" >> "$GITHUB_OUTPUT"
+
+        # A failed or canceled run exits non-zero: this step fails, and nothing
+        # below it commits. A broken run must never quietly commit partial work.
+        if [ -n "$STREAM" ]; then
+          if ! "${cmd[@]}" | tee "$STREAM"; then
+            echo "run_status=failed" >> "$GITHUB_OUTPUT"
+            echo "::error::kapi ${COMMAND} failed"
+            exit 1
+          fi
         else
-          echo "run_status=failed" >> "$GITHUB_OUTPUT"
-          echo "::error::kapi ${COMMAND} failed"
+          if ! "${cmd[@]}"; then
+            echo "run_status=failed" >> "$GITHUB_OUTPUT"
+            echo "::error::kapi ${COMMAND} failed"
+            exit 1
+          fi
+        fi
+        echo "run_status=success" >> "$GITHUB_OUTPUT"
+
+        [ -n "$STREAM" ] || exit 0
+
+        RESULT="$(jq -c 'select(.type == "result")' "$STREAM" | tail -n 1)"
+        if [ -z "$RESULT" ]; then
+          echo "::error::kapi up produced no result record — the run did not complete"
           exit 1
+        fi
+
+        CONVERGED="$(jq -r '.converged // false' <<< "$RESULT")"
+        PASSES="$(jq -r '.passes // 0' <<< "$RESULT")"
+        PARKED="$(jq -r '[.parkedScopes[]?.locale] | unique | join(",")' <<< "$RESULT")"
+
+        if [ "$CONVERGED" = "true" ]; then
+          OUTCOME="converged"
+        else
+          OUTCOME="parked"
+        fi
+
+        {
+          echo "outcome=${OUTCOME}"
+          echo "passes=${PASSES}"
+          echo "parked-locales=${PARKED}"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Run ${OUTCOME} after ${PASSES} pass(es)."
+        if [ "$OUTCOME" = "parked" ]; then
+          # Parked is pending work, not a broken run: what did converge is real
+          # progress and still gets committed below.
+          echo "::warning::Translations parked${PARKED:+ for: ${PARKED}} — work remains that the loop could not carry to the ship gate."
+          if [ "$FAIL_ON_PARKED" = "true" ]; then
+            echo "::error::fail-on-parked is set and the run parked"
+            exit 1
+          fi
         fi
 
     - name: Check for changes
@@ -84,27 +163,32 @@ runs:
       env:
         PATHS: ${{ inputs.paths }}
       run: |
+        set -euo pipefail
         if [ -z "$PATHS" ]; then
-          # No paths specified — check entire working tree
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          fi
+          # No paths specified — check the entire working tree. `kapi init`
+          # gitignores the .kapi/ state directory, so what shows up here is the
+          # localized content the run produced, including brand-new locale files
+          # (which a tracked-files-only diff would miss).
+          DIRT="$(git status --porcelain)"
         else
-          EXISTING_PATHS=""
+          EXISTING=()
+          # shellcheck disable=SC2086  # deliberate word-splitting over the path list
           for p in $PATHS; do
             if [ -e "$p" ]; then
-              EXISTING_PATHS="$EXISTING_PATHS $p"
+              EXISTING+=("$p")
             fi
           done
-          if [ -z "$EXISTING_PATHS" ]; then
+          if [ ${#EXISTING[@]} -eq 0 ]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          elif git diff --quiet -- $EXISTING_PATHS && git diff --cached --quiet -- $EXISTING_PATHS; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          DIRT="$(git status --porcelain -- "${EXISTING[@]}")"
+        fi
+
+        if [ -z "$DIRT" ]; then
+          echo "has_changes=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Commit changes
@@ -123,12 +207,21 @@ runs:
         if [ -z "$PATHS" ]; then
           git add -A
         else
+          # shellcheck disable=SC2086  # deliberate word-splitting over the path list
           for p in $PATHS; do
             if [ -e "$p" ]; then
-              git add "$p"
+              git add -A "$p"
             fi
           done
         fi
+
+        # Staging can still come up empty (everything the run touched is
+        # gitignored); committing nothing would fail the step for no reason.
+        if git diff --cached --quiet; then
+          echo "Nothing staged after all — skipping commit."
+          exit 0
+        fi
+
         git commit -m "$COMMIT_MESSAGE"
         git push
         echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -136,15 +229,19 @@ runs:
     - name: Set outputs
       id: set-outputs
       shell: bash
+      env:
+        HAS_CHANGES: ${{ steps.check-changes.outputs.has_changes }}
+        COMMIT_SHA: ${{ steps.commit.outputs.sha }}
       run: |
-        if [ "${{ steps.check-changes.outputs.has_changes }}" == "true" ]; then
+        set -euo pipefail
+        if [ "$HAS_CHANGES" = "true" ]; then
           echo "status=success" >> "$GITHUB_OUTPUT"
         else
           echo "status=no-changes" >> "$GITHUB_OUTPUT"
         fi
-        if [ "${{ steps.commit.outcome }}" == "success" ]; then
+        if [ -n "$COMMIT_SHA" ]; then
           echo "committed=true" >> "$GITHUB_OUTPUT"
-          echo "commit-sha=${{ steps.commit.outputs.sha }}" >> "$GITHUB_OUTPUT"
+          echo "commit-sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
         else
           echo "committed=false" >> "$GITHUB_OUTPUT"
           echo "commit-sha=" >> "$GITHUB_OUTPUT"
