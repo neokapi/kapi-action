@@ -1,6 +1,6 @@
 # Kapi Action
 
-A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) commands — converge translations, gate content quality, plan cost — and delivers the results — as a commit, a pull request, or a report on the PR that caused the work.
+A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) commands — catch up translations, gate content quality, plan cost — and delivers the results — as a commit, a pull request, or a report on the PR that caused the work.
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ This action requires the `kapi` CLI to be installed. Use [`neokapi/setup-kapi@v1
 
 ### Bring translations up to date
 
-`kapi up` is the convergence verb, and the Action's default. In a server-connected project — a recipe with a `server:` block — it pushes, converges on the Bowrain server (org keys, shared TM, team review), and pulls the produced targets back. With no server it runs the same loop locally.
+`kapi up` runs the kapi loop, and is the Action's default. In a server-connected project — a recipe with a `server:` block — it pushes, catches up on the Bowrain server (org keys, shared TM, team review), and pulls the produced targets back. With no server it runs the same loop locally.
 
 ```yaml
 name: Translations
@@ -35,12 +35,12 @@ jobs:
 
 ### Outcomes
 
-A convergence run ends in one of three states, and the Action treats them differently:
+A `kapi up` run ends in one of three states, and the Action treats them differently:
 
 | Run state | What it means | What the Action does |
 |---|---|---|
-| **converged** | Every gated scope cleared its ship gate | Delivers the produced translations |
-| **parked** | Work remains that the loop could not carry to the gate (a failing check, an unreachable gate) | Delivers what *did* converge, and annotates the run with the parked locales. This is normal pending work, not a failure |
+| **converged** | Every gated scope cleared its ship gate — the project is up to date | Delivers the produced translations |
+| **parked** | Work remains that the loop could not carry to the gate (a failing check, an unreachable gate) | Delivers what it *did* catch up, and annotates the run with the parked locales. This is normal pending work, not a failure |
 | **failed / canceled** | The run broke (a provider outage, a server error, a cancel) | `kapi up` exits non-zero, the step fails, **nothing is delivered** |
 
 Parked is the interesting one: partial progress is real progress, so the default is to deliver it and warn rather than throw it away. To block instead:
@@ -51,7 +51,7 @@ Parked is the interesting one: partial progress is real progress, so the default
     fail-on-parked: "true"
 ```
 
-### How convergence works
+### How the loop works
 
 `kapi up` treats the recipe as the desired state — the languages the project targets, and the ship gates that define *shippable* — and reconciles the content toward it. Each pass, for every language behind its gate:
 
@@ -68,7 +68,7 @@ flowchart LR
         TM["1 · reuse<br/>TM exact matches"] --> AI["2 · translate<br/>AI + terminology"] --> CK["3 · check<br/>placeholders · terms · tags"]
     end
     U --> PASS
-    CK -->|every gate clear| CV["converged<br/>PR with translations"]
+    CK -->|every gate met| CV["up to date<br/>PR with translations"]
     CK -->|needs a person| PK["parked<br/>the review queue"]
     PK --> RV["review & approve<br/>recorded in .kapi-state.json"]
     RV -.->|next run sees it| U
@@ -76,7 +76,7 @@ flowchart LR
 
 **Parked work is the review queue, not an error.** What the machine couldn't decide waits for a person: review the wording, approve or fix it, and the decision is recorded — in the committed `.kapi-state.json` state store, or on the connected server. Approvals raise the `reviewed` coverage the ship gate measures, so the next run and the next gate see them. `kapi check --ship` (see [Gate pull requests](#gate-pull-requests-on-content-quality)) is what enforces the bar at release time.
 
-The convergence report (outcome, passes, parked locales) is always written to the job summary. Under the hood the Action runs `kapi up --json`, an NDJSON stream — one convergence event per line, closed by a single `{"type":"result", ...}` record. That record is the contract; the events are the log. It becomes the `outcome`, `passes`, and `parked-locales` outputs.
+The kapi up report (outcome, passes, parked locales) is always written to the job summary. Under the hood the Action runs `kapi up --json`, an NDJSON stream — one convergence event per line, closed by a single `{"type":"result", ...}` record. That record is the contract; the events are the log. It becomes the `outcome`, `passes`, and `parked-locales` outputs.
 
 ### Deliver as a pull request
 
@@ -93,11 +93,11 @@ steps:
       create-pull-request: "true"
 ```
 
-The created PR carries the convergence report in its description. `pr-title`, `pr-labels`, `pr-base`, and `branch-prefix` tune it; labels are applied best-effort (a label that doesn't exist in the repo never fails the run). The PR URL lands in the `pull-request-url` output.
+The created PR carries the kapi up report in its description. `pr-title`, `pr-labels`, `pr-base`, and `branch-prefix` tune it; labels are applied best-effort (a label that doesn't exist in the repo never fails the run). The PR URL lands in the `pull-request-url` output.
 
 ### Plan mode: the cost of a change, on its PR
 
-`plan: "true"` dry-runs the convergence loop — pending work, TM leverage, and a token estimate, with no writes and no provider calls (so it needs no API keys). With `pr-comment: "true"` on a pull-request event, the plan lands as one sticky comment that re-runs update in place:
+`plan: "true"` dry-runs the kapi loop — pending work, TM leverage, and a token estimate, with no writes and no provider calls (so it needs no API keys). With `pr-comment: "true"` on a pull-request event, the plan lands as one sticky comment that re-runs update in place:
 
 ```yaml
 name: Translation plan
@@ -153,7 +153,7 @@ Ordinary builds never fail on target-language drift — a locale that is behind 
 
 ### Run any other kapi command
 
-`command` takes any kapi subcommand — the Action stays a general runner. The convergence outputs are only populated for `up`.
+`command` takes any kapi subcommand — the Action stays a general runner. The loop outputs (`outcome`, `passes`, `parked-locales`) are only populated for `up`.
 
 ```yaml
 - uses: neokapi/kapi-action@v1
@@ -169,7 +169,7 @@ This runs `kapi run -p myproject.kapi translate`.
 
 ### Caching
 
-Convergence is incremental via the project's `.kapi/cache` (block store, extractions), which is gitignored and therefore rebuilt on every fresh runner. Restore it across runs to skip re-extraction:
+The loop runs incrementally via the project's `.kapi/cache` (block store, extractions), which is gitignored and therefore rebuilt on every fresh runner. Restore it across runs to skip re-extraction:
 
 ```yaml
 - uses: actions/cache@v5
@@ -179,7 +179,7 @@ Convergence is incremental via the project's `.kapi/cache` (block store, extract
     restore-keys: kapi-cache-
 ```
 
-Server-connected projects don't need this — the convergence state lives on the server.
+Server-connected projects don't need this — the project state lives on the server.
 
 ## Inputs
 
