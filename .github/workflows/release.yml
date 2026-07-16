@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  update-major-tag:
+    name: Update floating major tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Parse version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          MAJOR=$(echo "${TAG}" | grep -oP '^v\d+')
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
+          echo "Tag: ${TAG}, Major: ${MAJOR}"
+
+      - name: Update major tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          MAJOR: ${{ steps.version.outputs.major }}
+        run: |
+          git tag -f "${MAJOR}" "${TAG}"
+          git push -f origin "${MAJOR}"
+          echo "Updated ${MAJOR} → ${TAG}"
