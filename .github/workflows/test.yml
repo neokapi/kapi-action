@@ -1,0 +1,131 @@
+name: Test
+
+# Keyless self-tests against the fixture project in test/fixture — plan mode
+# and check need no provider or server credentials. The CLI version is pinned
+# to the first release that ships `kapi up` / `check --ship`; bump
+# deliberately.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+env:
+  KAPI_VERSION: "1.2.0-rc11"
+
+jobs:
+  test-plan:
+    name: "up --plan (dry run + outputs)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: neokapi/setup-kapi@v1
+        with:
+          version: "1.2.0-rc11"
+          plugins: ""
+
+      - name: Run plan
+        id: plan
+        uses: ./
+        with:
+          plan: "true"
+          project: "test/fixture/fixture.kapi"
+          commit: "false"
+
+      - name: Verify plan outputs
+        env:
+          MISSING: ${{ steps.plan.outputs.plan-missing }}
+          TOKENS: ${{ steps.plan.outputs.plan-token-estimate }}
+        run: |
+          echo "plan: missing=${MISSING} tokens=${TOKENS}"
+          test "${MISSING}" -gt 0
+          test "${TOKENS}" -gt 0
+
+  test-check-gate:
+    name: "check --ship (exit-3 contract)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: neokapi/setup-kapi@v1
+        with:
+          version: "1.2.0-rc11"
+          plugins: ""
+
+      # The fixture is deliberately untranslated: the ship gate must FAIL the
+      # step (exit 3) while still publishing gate=fail — not die before its
+      # outputs, and not pass.
+      - name: Run failing ship gate
+        id: gate
+        continue-on-error: true
+        uses: ./
+        with:
+          command: check
+          args: "--ship"
+          project: "test/fixture/fixture.kapi"
+          commit: "false"
+
+      - name: Verify gate contract
+        env:
+          STEP_OUTCOME: ${{ steps.gate.outcome }}
+          GATE: ${{ steps.gate.outputs.gate }}
+        run: |
+          echo "step outcome: ${STEP_OUTCOME}, gate: ${GATE}"
+          test "${STEP_OUTCOME}" = "failure"
+          test "${GATE}" = "fail"
+
+  test-check-file:
+    name: "check <files> (file-mode pass)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: neokapi/setup-kapi@v1
+        with:
+          version: "1.2.0-rc11"
+          plugins: ""
+
+      - name: Gate the fixture source file
+        id: check
+        uses: ./
+        with:
+          command: check
+          args: "test/fixture/content/en.json"
+          commit: "false"
+
+      - name: Verify pass
+        env:
+          GATE: ${{ steps.check.outputs.gate }}
+        run: test "${GATE}" = "pass"
+
+  test-run-keyless:
+    name: "pseudo-translate (general runner)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: neokapi/setup-kapi@v1
+        with:
+          version: "1.2.0-rc11"
+          plugins: ""
+
+      - name: Pseudo-translate the fixture
+        id: pseudo
+        uses: ./
+        with:
+          command: pseudo-translate
+          args: "test/fixture/content/en.json --target-lang qps"
+
+      # The produced en_qps.json is gitignored by the fixture, so the action
+      # must report no-changes rather than trying to commit.
+      - name: Verify no-changes path
+        env:
+          STATUS: ${{ steps.pseudo.outputs.status }}
+        run: |
+          test -f test/fixture/content/en_qps.json
+          test "${STATUS}" = "no-changes"

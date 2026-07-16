@@ -1,5 +1,8 @@
 name: "Kapi Run"
-description: "Run kapi localization commands and commit results"
+description: "Run kapi localization commands — converge, gate, plan — and deliver the results as a commit or pull request"
+branding:
+  icon: "refresh-cw"
+  color: "blue"
 
 inputs:
   command:
@@ -14,6 +17,13 @@ inputs:
     description: "Path to .kapi project file (-p flag)"
     required: false
     default: ""
+  plan:
+    description: >-
+      With `command: up`, dry-run instead: report pending work, TM leverage,
+      and a token estimate without writing anything or calling a provider.
+      Pairs with `pr-comment` to post the cost of a change on its PR.
+    required: false
+    default: "false"
   fail-on-parked:
     description: >-
       With `command: up`, fail the workflow when the run parks (work remains that
@@ -30,6 +40,39 @@ inputs:
     description: "Commit message"
     required: false
     default: "chore: update translations via kapi"
+  create-pull-request:
+    description: >-
+      Deliver changes as a pull request instead of pushing to the current
+      branch. Needs `permissions: pull-requests: write` (plus contents: write).
+    required: false
+    default: "false"
+  pr-title:
+    description: "Title for the created pull request"
+    required: false
+    default: "chore: update translations via kapi"
+  pr-labels:
+    description: "Comma-separated labels for the created pull request"
+    required: false
+    default: "translations,kapi"
+  pr-base:
+    description: "Base branch for the created pull request (empty = repository default branch)"
+    required: false
+    default: ""
+  branch-prefix:
+    description: "Branch name prefix for pull-request delivery"
+    required: false
+    default: "kapi/up"
+  pr-comment:
+    description: >-
+      On pull-request events, post one sticky comment with the report (plan,
+      convergence outcome, or gate result) that re-runs update in place.
+      Needs `permissions: pull-requests: write`.
+    required: false
+    default: "false"
+  token:
+    description: "GitHub token for PR creation and comments"
+    required: false
+    default: ${{ github.token }}
   git-user-name:
     description: "Git committer name"
     required: false
@@ -56,12 +99,30 @@ outputs:
   parked-locales:
     description: "With `command: up`: comma-separated locales still short of their gate"
     value: ${{ steps.run-kapi.outputs.parked-locales }}
+  gate:
+    description: "With `command: check`: `pass` or `fail`"
+    value: ${{ steps.run-kapi.outputs.gate }}
+  plan-missing:
+    description: "With `plan: true`: pending units across all locales"
+    value: ${{ steps.run-kapi.outputs.plan-missing }}
+  plan-tm-exact:
+    description: "With `plan: true`: units recoverable from TM exact hits"
+    value: ${{ steps.run-kapi.outputs.plan-tm-exact }}
+  plan-ai-remaining:
+    description: "With `plan: true`: units left for AI translation"
+    value: ${{ steps.run-kapi.outputs.plan-ai-remaining }}
+  plan-token-estimate:
+    description: "With `plan: true`: estimated tokens for the remaining units"
+    value: ${{ steps.run-kapi.outputs.plan-token-estimate }}
   committed:
     description: "Whether a commit was created"
     value: ${{ steps.set-outputs.outputs.committed }}
   commit-sha:
     description: "SHA of the created commit (empty if no commit)"
     value: ${{ steps.set-outputs.outputs.commit-sha }}
+  pull-request-url:
+    description: "URL of the created pull request (empty if none)"
+    value: ${{ steps.deliver.outputs.pr-url }}
 
 runs:
   using: "composite"
@@ -76,6 +137,7 @@ runs:
         COMMAND: ${{ inputs.command }}
         ARGS: ${{ inputs.args }}
         PROJECT: ${{ inputs.project }}
+        PLAN: ${{ inputs.plan }}
         FAIL_ON_PARKED: ${{ inputs.fail-on-parked }}
       run: |
         set -euo pipefail
@@ -86,6 +148,68 @@ runs:
         if [ -n "$ARGS" ]; then
           read -ra extra <<< "$ARGS"
           cmd+=("${extra[@]}")
+        fi
+
+        # ---------- plan mode: dry run, no writes, no provider calls ----------
+        if [ "$COMMAND" = "up" ] && [ "$PLAN" = "true" ]; then
+          cmd+=(--plan --json)
+          printf 'Running:'; printf ' %q' "${cmd[@]}"; echo
+          "${cmd[@]}" > "${RUNNER_TEMP}/kapi-plan.json"
+          MISSING=$(jq -r '.totals.missingTarget // 0' "${RUNNER_TEMP}/kapi-plan.json")
+          TM=$(jq -r '.totals.tmExact // 0' "${RUNNER_TEMP}/kapi-plan.json")
+          AI=$(jq -r '.totals.aiRemaining // 0' "${RUNNER_TEMP}/kapi-plan.json")
+          TOKENS=$(jq -r '.totals.tokenEstimate // 0' "${RUNNER_TEMP}/kapi-plan.json")
+          {
+            echo "mode=plan"
+            echo "plan-missing=${MISSING}"
+            echo "plan-tm-exact=${TM}"
+            echo "plan-ai-remaining=${AI}"
+            echo "plan-token-estimate=${TOKENS}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## kapi up — plan"
+            echo
+            echo "This change leaves **${MISSING} unit(s)** of pending translation work: ${TM} recoverable from TM, ${AI} for AI (~${TOKENS} tokens estimated)."
+            echo
+            echo "| Locale | Pending | TM exact | AI remaining | Token estimate |"
+            echo "|---|---|---|---|---|"
+            jq -r '.scopes[] | "| \(.locale) | \(.missingTarget) | \(.tmExact) | \(.aiRemaining) | \(.tokenEstimate) |"' "${RUNNER_TEMP}/kapi-plan.json"
+            echo
+            echo "_Estimate is source-chars/4; no provider calls were made._"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Plan: ${MISSING} unit(s) pending, ${TM} from TM, ${AI} for AI (~${TOKENS} tokens)."
+          exit 0
+        fi
+
+        # ---------- check: the quality gate, with a distinct exit-3 signal ----------
+        if [ "$COMMAND" = "check" ]; then
+          printf 'Running:'; printf ' %q' "${cmd[@]}"; echo
+          # || rc=$? keeps the gate's exit code without tripping errexit — the
+          # annotation, summary, and outputs must still publish on a failing gate.
+          rc=0
+          "${cmd[@]}" | tee "${RUNNER_TEMP}/kapi-check-output.txt" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "gate=pass" >> "$GITHUB_OUTPUT"
+            {
+              echo "## kapi check"
+              echo
+              echo "✅ **Gate: pass**"
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$rc" -eq 3 ]; then
+            echo "gate=fail" >> "$GITHUB_OUTPUT"
+            {
+              echo "## kapi check"
+              echo
+              echo "❌ **Gate: unmet** — a brand, terminology, QA, or coverage gate failed. See the findings in the job log."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::kapi gate unmet (exit 3) — content quality gates failed; read the findings and fix them. This is 'not on-spec yet', not a crash."
+            exit 3
+          else
+            echo "run_status=failed" >> "$GITHUB_OUTPUT"
+            echo "::error::kapi check failed operationally (exit ${rc})"
+            exit "$rc"
+          fi
+          exit 0
         fi
 
         # `kapi up` is the convergence verb: in a server-connected project it
@@ -146,6 +270,16 @@ runs:
           echo "parked-locales=${PARKED}"
         } >> "$GITHUB_OUTPUT"
 
+        {
+          echo "## kapi up — convergence report"
+          echo
+          echo "| | |"
+          echo "|---|---|"
+          echo "| Outcome | **${OUTCOME}** |"
+          echo "| Passes | ${PASSES} |"
+          echo "| Parked locales | ${PARKED:-—} |"
+        } >> "$GITHUB_STEP_SUMMARY"
+
         echo "Run ${OUTCOME} after ${PASSES} pass(es)."
         if [ "$OUTCOME" = "parked" ]; then
           # Parked is pending work, not a broken run: what did converge is real
@@ -159,6 +293,7 @@ runs:
 
     - name: Check for changes
       id: check-changes
+      if: inputs.plan != 'true'
       shell: bash
       env:
         PATHS: ${{ inputs.paths }}
@@ -191,19 +326,30 @@ runs:
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Commit changes
-      id: commit
-      if: inputs.commit == 'true' && steps.check-changes.outputs.has_changes == 'true'
+    - name: Commit and deliver changes
+      id: deliver
+      if: inputs.plan != 'true' && inputs.commit == 'true' && steps.check-changes.outputs.has_changes == 'true'
       shell: bash
       env:
         GIT_USER_NAME: ${{ inputs.git-user-name }}
         GIT_USER_EMAIL: ${{ inputs.git-user-email }}
         COMMIT_MESSAGE: ${{ inputs.commit-message }}
         PATHS: ${{ inputs.paths }}
+        CREATE_PR: ${{ inputs.create-pull-request }}
+        PR_TITLE: ${{ inputs.pr-title }}
+        PR_LABELS: ${{ inputs.pr-labels }}
+        PR_BASE: ${{ inputs.pr-base }}
+        BRANCH_PREFIX: ${{ inputs.branch-prefix }}
+        GH_TOKEN: ${{ inputs.token }}
+        RUN_ID: ${{ github.run_id }}
+        OUTCOME: ${{ steps.run-kapi.outputs.outcome }}
+        PASSES: ${{ steps.run-kapi.outputs.passes }}
+        PARKED: ${{ steps.run-kapi.outputs.parked-locales }}
       run: |
         set -euo pipefail
         git config user.name "$GIT_USER_NAME"
         git config user.email "$GIT_USER_EMAIL"
+
         if [ -z "$PATHS" ]; then
           git add -A
         else
@@ -222,16 +368,114 @@ runs:
           exit 0
         fi
 
+        if [ "$CREATE_PR" != "true" ]; then
+          git commit -m "$COMMIT_MESSAGE"
+          git push
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        BRANCH="${BRANCH_PREFIX}-${RUN_ID}"
+        git checkout -b "$BRANCH"
         git commit -m "$COMMIT_MESSAGE"
-        git push
+        git push -u origin "$BRANCH"
         echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+        BODY="<!-- kapi-convergence-report -->
+        ## kapi up — convergence report
+
+        | | |
+        |---|---|
+        | Outcome | **${OUTCOME:-—}** |
+        | Passes | ${PASSES:-—} |
+        | Parked locales | ${PARKED:-—} |
+
+        Produced by [kapi-action](https://github.com/neokapi/kapi-action). Parked scopes need a person — see the run log for the gate each one is short of."
+        PR_ARGS=(--title "$PR_TITLE" --body "$BODY" --head "$BRANCH")
+        [ -n "$PR_BASE" ] && PR_ARGS+=(--base "$PR_BASE")
+        PR_URL=$(gh pr create "${PR_ARGS[@]}")
+        echo "pr-url=${PR_URL}" >> "$GITHUB_OUTPUT"
+        echo "Opened ${PR_URL}"
+        # Labels are best-effort: gh fails when a label doesn't exist in the
+        # repo, and a missing label must never fail a delivered run.
+        if [ -n "$PR_LABELS" ]; then
+          gh pr edit "$PR_URL" --add-label "$PR_LABELS" || echo "::notice::could not add labels '${PR_LABELS}' (create them in the repo to label kapi PRs)"
+        fi
+
+    - name: Sticky PR comment
+      if: inputs.pr-comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        MODE: ${{ steps.run-kapi.outputs.mode }}
+        OUTCOME: ${{ steps.run-kapi.outputs.outcome }}
+        PASSES: ${{ steps.run-kapi.outputs.passes }}
+        PARKED: ${{ steps.run-kapi.outputs.parked-locales }}
+        GATE: ${{ steps.run-kapi.outputs.gate }}
+        PLAN_MISSING: ${{ steps.run-kapi.outputs.plan-missing }}
+        PLAN_TM: ${{ steps.run-kapi.outputs.plan-tm-exact }}
+        PLAN_AI: ${{ steps.run-kapi.outputs.plan-ai-remaining }}
+        PLAN_TOKENS: ${{ steps.run-kapi.outputs.plan-token-estimate }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        MARKER="<!-- kapi-report -->"
+
+        if [ "$MODE" = "plan" ]; then
+          TABLE=$(jq -r '.scopes[] | "| \(.locale) | \(.missingTarget) | \(.tmExact) | \(.aiRemaining) | \(.tokenEstimate) |"' "${RUNNER_TEMP}/kapi-plan.json" 2>/dev/null || true)
+          BODY="${MARKER}
+        ## kapi up — plan
+
+        This change leaves **${PLAN_MISSING:-0} unit(s)** of pending translation work: ${PLAN_TM:-0} recoverable from TM, ${PLAN_AI:-0} for AI (~${PLAN_TOKENS:-0} tokens estimated).
+
+        | Locale | Pending | TM exact | AI remaining | Token estimate |
+        |---|---|---|---|---|
+        ${TABLE}
+
+        _[Run](${RUN_URL}) · estimate is source-chars/4, no provider calls._"
+        elif [ -n "$GATE" ]; then
+          if [ "$GATE" = "pass" ]; then
+            HEAD="✅ **Gate: pass** — every requested gate passed."
+          else
+            HEAD="❌ **Gate: unmet** — a content quality gate failed. See the [run log](${RUN_URL}) for the findings."
+          fi
+          BODY="${MARKER}
+        ## kapi check
+
+        ${HEAD}"
+        elif [ -n "$OUTCOME" ]; then
+          BODY="${MARKER}
+        ## kapi up — convergence report
+
+        | | |
+        |---|---|
+        | Outcome | **${OUTCOME}** |
+        | Passes | ${PASSES:-—} |
+        | Parked locales | ${PARKED:-—} |
+
+        _[Run](${RUN_URL})_"
+        else
+          echo "Nothing to report — skipping comment."
+          exit 0
+        fi
+
+        COMMENT_ID=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate \
+          --jq "[.[] | select(.body | startswith(\"${MARKER}\"))][0].id // empty")
+        if [ -n "$COMMENT_ID" ]; then
+          gh api --method PATCH "repos/${REPO}/issues/comments/${COMMENT_ID}" -f body="$BODY" > /dev/null
+        else
+          gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" -f body="$BODY" > /dev/null
+        fi
+        echo "Report posted to PR #${PR_NUMBER}."
 
     - name: Set outputs
       id: set-outputs
       shell: bash
       env:
         HAS_CHANGES: ${{ steps.check-changes.outputs.has_changes }}
-        COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+        COMMIT_SHA: ${{ steps.deliver.outputs.sha }}
       run: |
         set -euo pipefail
         if [ "$HAS_CHANGES" = "true" ]; then

@@ -1,16 +1,16 @@
 # Kapi Action
 
-A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) localization commands and commits the results.
+A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) localization commands and delivers the results — as a commit, a pull request, or a report on the PR that caused the work.
 
 ## Prerequisites
 
-This action requires the `kapi` CLI to be installed. Use [`neokapi/setup-kapi@v1`](https://github.com/neokapi/setup-kapi) to install it, or add it to `PATH` yourself.
+This action requires the `kapi` CLI to be installed. Use [`neokapi/setup-kapi@v1`](https://github.com/neokapi/setup-kapi) to install it (the bowrain plugin is included by default), or add it to `PATH` yourself.
 
 ## Usage
 
 ### Bring translations up to date
 
-`kapi up` is the convergence verb, and the Action's default. In a server-connected project — a recipe with a `server:` block, plus the `kapi-bowrain` plugin — it pushes, converges on the Bowrain server (org keys, shared TM, team review), and pulls the produced targets back. With no server it runs the same loop locally.
+`kapi up` is the convergence verb, and the Action's default. In a server-connected project — a recipe with a `server:` block — it pushes, converges on the Bowrain server (org keys, shared TM, team review), and pulls the produced targets back. With no server it runs the same loop locally.
 
 ```yaml
 name: Translations
@@ -39,11 +39,11 @@ A convergence run ends in one of three states, and the Action treats them differ
 
 | Run state | What it means | What the Action does |
 |---|---|---|
-| **converged** | Every gated scope cleared its ship gate | Commits the produced translations |
-| **parked** | Work remains that the loop could not carry to the gate (a failing check, an unreachable gate) | Commits what *did* converge, and annotates the run with the parked locales. This is normal pending work, not a failure |
-| **failed / canceled** | The run broke (a provider outage, a server error, a cancel) | `kapi up` exits non-zero, the step fails, **nothing is committed** |
+| **converged** | Every gated scope cleared its ship gate | Delivers the produced translations |
+| **parked** | Work remains that the loop could not carry to the gate (a failing check, an unreachable gate) | Delivers what *did* converge, and annotates the run with the parked locales. This is normal pending work, not a failure |
+| **failed / canceled** | The run broke (a provider outage, a server error, a cancel) | `kapi up` exits non-zero, the step fails, **nothing is delivered** |
 
-Parked is the interesting one: partial progress is real progress, so the default is to commit it and warn rather than throw it away. To block instead:
+Parked is the interesting one: partial progress is real progress, so the default is to deliver it and warn rather than throw it away. To block instead:
 
 ```yaml
 - uses: neokapi/kapi-action@v1
@@ -51,19 +51,80 @@ Parked is the interesting one: partial progress is real progress, so the default
     fail-on-parked: "true"
 ```
 
-Under the hood the Action runs `kapi up --json`, an NDJSON stream — one convergence event per line, closed by a single `{"type":"result", ...}` record. That record is the contract; the events are the log. It becomes the `outcome`, `passes`, and `parked-locales` outputs:
+The convergence report (outcome, passes, parked locales) is always written to the job summary. Under the hood the Action runs `kapi up --json`, an NDJSON stream — one convergence event per line, closed by a single `{"type":"result", ...}` record. That record is the contract; the events are the log. It becomes the `outcome`, `passes`, and `parked-locales` outputs.
+
+### Deliver as a pull request
+
+By default the Action commits to the current branch. With `create-pull-request: "true"` it delivers a branch + PR instead — the reviewable unit, and the path that works with branch protection on the default branch:
 
 ```yaml
-- uses: neokapi/kapi-action@v1
-  id: kapi
-  with:
-    commit: "false"
+permissions:
+  contents: write
+  pull-requests: write
 
-- run: |
-    echo "outcome: ${{ steps.kapi.outputs.outcome }}"
-    echo "passes:  ${{ steps.kapi.outputs.passes }}"
-    echo "parked:  ${{ steps.kapi.outputs.parked-locales }}"
+steps:
+  - uses: neokapi/kapi-action@v1
+    with:
+      create-pull-request: "true"
 ```
+
+The created PR carries the convergence report in its description. `pr-title`, `pr-labels`, `pr-base`, and `branch-prefix` tune it; labels are applied best-effort (a label that doesn't exist in the repo never fails the run). The PR URL lands in the `pull-request-url` output.
+
+### Plan mode: the cost of a change, on its PR
+
+`plan: "true"` dry-runs the convergence loop — pending work, TM leverage, and a token estimate, with no writes and no provider calls (so it needs no API keys). With `pr-comment: "true"` on a pull-request event, the plan lands as one sticky comment that re-runs update in place:
+
+```yaml
+name: Translation plan
+on:
+  pull_request:
+    paths: ["src/locales/en/**", "content/**"]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: neokapi/setup-kapi@v1
+      - uses: neokapi/kapi-action@v1
+        with:
+          plan: "true"
+          pr-comment: "true"
+```
+
+> "This change leaves **42 unit(s)** of pending translation work: 30 recoverable from TM, 12 for AI (~450 tokens estimated)."
+
+### Gate pull requests on content quality
+
+`command: check` with `--ship` is the release bar: the project's bound quality gates (brand, terminology, QA) plus its ship/source coverage gates. An unmet gate exits `3`, which the Action surfaces as a distinct **"gate unmet"** annotation (not a generic failure) and as the `gate` output:
+
+```yaml
+name: Ship gate
+on:
+  pull_request:
+    paths: ["content/**", "src/locales/**"]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  ship-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: neokapi/setup-kapi@v1
+      - uses: neokapi/kapi-action@v1
+        with:
+          command: check
+          args: "--ship"
+          commit: "false"
+          pr-comment: "true"
+```
+
+Ordinary builds never fail on target-language drift — a locale that is behind is pending work, not an error. `check --ship` is the explicit, opt-in enforcement point.
 
 ### Run any other kapi command
 
@@ -81,6 +142,20 @@ Under the hood the Action runs `kapi up --json`, an NDJSON stream — one conver
 
 This runs `kapi run -p myproject.kapi translate`.
 
+### Caching
+
+Convergence is incremental via the project's `.kapi/cache` (block store, extractions), which is gitignored and therefore rebuilt on every fresh runner. Restore it across runs to skip re-extraction:
+
+```yaml
+- uses: actions/cache@v5
+  with:
+    path: .kapi/cache
+    key: kapi-cache-${{ hashFiles('*.kapi', 'src/locales/en/**') }}
+    restore-keys: kapi-cache-
+```
+
+Server-connected projects don't need this — the convergence state lives on the server.
+
 ## Inputs
 
 | Input | Default | Description |
@@ -88,9 +163,17 @@ This runs `kapi run -p myproject.kapi translate`.
 | `command` | `up` | Kapi subcommand to execute |
 | `args` | | Additional arguments |
 | `project` | | Path to `.kapi` project file (`-p` flag) |
+| `plan` | `false` | With `command: up`: dry run — pending work, TM leverage, token estimate; no writes, no provider calls |
 | `fail-on-parked` | `false` | With `command: up`, fail the workflow when the run parks instead of committing partial progress |
 | `commit` | `true` | Whether to commit changes |
 | `commit-message` | `chore: update translations via kapi` | Commit message |
+| `create-pull-request` | `false` | Deliver as a branch + PR instead of pushing the current branch |
+| `pr-title` | `chore: update translations via kapi` | Title for the created PR |
+| `pr-labels` | `translations,kapi` | Comma-separated labels (best-effort) |
+| `pr-base` | | Base branch for the PR (empty = repository default) |
+| `branch-prefix` | `kapi/up` | Branch prefix for PR delivery |
+| `pr-comment` | `false` | Sticky report comment on pull-request events |
+| `token` | `${{ github.token }}` | Token for PR creation and comments |
 | `git-user-name` | `Kapi Bot` | Git committer name |
 | `git-user-email` | `bot@kapi.dev` | Git committer email |
 | `paths` | | Space-separated paths to stage for commit (all changes if empty) |
@@ -103,12 +186,15 @@ This runs `kapi run -p myproject.kapi translate`.
 | `outcome` | With `command: up`: `converged` or `parked` (a failed run fails the step, so it never reaches an output) |
 | `passes` | With `command: up`: how many reconciliation passes the run took |
 | `parked-locales` | With `command: up`: comma-separated locales still short of their gate |
+| `gate` | With `command: check`: `pass` or `fail` |
+| `plan-missing` / `plan-tm-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals |
 | `committed` | `true` or `false` |
 | `commit-sha` | SHA of the created commit (empty if no commit) |
+| `pull-request-url` | URL of the created PR (empty if none) |
 
 ## Permissions
 
-The workflow must have `permissions: contents: write` for the commit step to push changes.
+`permissions: contents: write` for commit/push delivery; add `pull-requests: write` for `create-pull-request` and `pr-comment`.
 
 ## License
 
