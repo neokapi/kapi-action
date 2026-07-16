@@ -1,5 +1,5 @@
 name: "Kapi Run"
-description: "Run kapi localization commands — converge, gate, plan — and deliver the results as a commit or pull request"
+description: "Run kapi commands — converge translations, gate content quality, plan cost — and deliver the results as a commit or pull request"
 branding:
   icon: "refresh-cw"
   color: "blue"
