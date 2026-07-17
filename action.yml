@@ -1,5 +1,5 @@
 name: "Kapi Run"
-description: "Run kapi commands — converge translations, gate content quality, plan cost — and deliver the results as a commit or pull request"
+description: "Run kapi commands — catch up translations, gate content quality, plan cost — and deliver the results as a commit or pull request"
 branding:
   icon: "refresh-cw"
   color: "blue"
@@ -28,7 +28,7 @@ inputs:
     description: >-
       With `command: up`, fail the workflow when the run parks (work remains that
       the loop could not carry to the ship gate). Parked is normal pending work,
-      not a broken run, so the default is to commit what did converge and
+      not a broken run, so the default is to commit what it caught up and
       annotate the rest.
     required: false
     default: "false"
@@ -65,7 +65,7 @@ inputs:
   pr-comment:
     description: >-
       On pull-request events, post one sticky comment with the report (plan,
-      convergence outcome, or gate result) that re-runs update in place.
+      `kapi up` outcome, or gate result) that re-runs update in place.
       Needs `permissions: pull-requests: write`.
     required: false
     default: "false"
@@ -212,8 +212,8 @@ runs:
           exit 0
         fi
 
-        # `kapi up` is the convergence verb: in a server-connected project it
-        # pushes, converges on the Bowrain server, and pulls the produced targets
+        # `kapi up` runs the kapi loop: in a server-connected project it
+        # pushes, catches up on the Bowrain server, and pulls the produced targets
         # back; with no server it runs the same loop locally. Under --json it is
         # an NDJSON stream — one convergence event per line, closed by a single
         # {"type":"result", ...} record. That record is the CI contract; the
@@ -271,7 +271,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
         {
-          echo "## kapi up — convergence report"
+          echo "## kapi up report"
           echo
           echo "| | |"
           echo "|---|---|"
@@ -282,7 +282,7 @@ runs:
 
         echo "Run ${OUTCOME} after ${PASSES} pass(es)."
         if [ "$OUTCOME" = "parked" ]; then
-          # Parked is pending work, not a broken run: what did converge is real
+          # Parked is pending work, not a broken run: what it caught up is real
           # progress and still gets committed below.
           echo "::warning::Translations parked${PARKED:+ for: ${PARKED}} — work remains that the loop could not carry to the ship gate."
           if [ "$FAIL_ON_PARKED" = "true" ]; then
@@ -382,7 +382,7 @@ runs:
         echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
         BODY="<!-- kapi-convergence-report -->
-        ## kapi up — convergence report
+        ## kapi up report
 
         | | |
         |---|---|
@@ -447,7 +447,7 @@ runs:
         ${HEAD}"
         elif [ -n "$OUTCOME" ]; then
           BODY="${MARKER}
-        ## kapi up — convergence report
+        ## kapi up report
 
         | | |
         |---|---|
