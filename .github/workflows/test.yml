@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 env:
-  KAPI_VERSION: "1.2.0-rc11"
+  KAPI_VERSION: "1.2.0-rc14"
 
 jobs:
   test-plan:
@@ -26,7 +26,7 @@ jobs:
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: "1.2.0-rc11"
+          version: "1.2.0-rc14"
           plugins: ""
 
       - name: Run plan
@@ -54,7 +54,7 @@ jobs:
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: "1.2.0-rc11"
+          version: "1.2.0-rc14"
           plugins: ""
 
       # The fixture is deliberately untranslated: the ship gate must FAIL the
@@ -87,7 +87,7 @@ jobs:
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: "1.2.0-rc11"
+          version: "1.2.0-rc14"
           plugins: ""
 
       - name: Gate the fixture source file
@@ -111,7 +111,7 @@ jobs:
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: "1.2.0-rc11"
+          version: "1.2.0-rc14"
           plugins: ""
 
       - name: Pseudo-translate the fixture

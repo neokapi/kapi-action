@@ -14,7 +14,7 @@ inputs:
     required: false
     default: ""
   project:
-    description: "Path to .kapi project file (-p flag)"
+    description: "Path to the kapi.yaml recipe (-p flag)"
     required: false
     default: ""
   plan:

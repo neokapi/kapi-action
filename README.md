@@ -160,12 +160,12 @@ Ordinary builds never fail on target-language drift — a locale that is behind 
   with:
     command: run
     args: "translate"
-    project: "myproject.kapi"
+    project: "kapi.yaml"
     paths: "src/locales/"
     commit-message: "chore: update translations"
 ```
 
-This runs `kapi run -p myproject.kapi translate`.
+This runs `kapi run -p kapi.yaml translate`.
 
 ### Caching
 
@@ -175,7 +175,7 @@ The loop runs incrementally via the project's `.kapi/cache` (block store, extrac
 - uses: actions/cache@v5
   with:
     path: .kapi/cache
-    key: kapi-cache-${{ hashFiles('*.kapi', 'src/locales/en/**') }}
+    key: kapi-cache-${{ hashFiles('kapi.yaml', 'src/locales/en/**') }}
     restore-keys: kapi-cache-
 ```
 
@@ -187,7 +187,7 @@ Server-connected projects don't need this — the project state lives on the ser
 |---|---|---|
 | `command` | `up` | Kapi subcommand to execute |
 | `args` | | Additional arguments |
-| `project` | | Path to `.kapi` project file (`-p` flag) |
+| `project` | | Path to the `kapi.yaml` recipe (`-p` flag) |
 | `plan` | `false` | With `command: up`: dry run — pending work, TM leverage, token estimate; no writes, no provider calls |
 | `fail-on-parked` | `false` | With `command: up`, fail the workflow when the run parks instead of committing partial progress |
 | `commit` | `true` | Whether to commit changes |
