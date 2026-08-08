@@ -35,7 +35,6 @@ jobs:
         with:
           plan: "true"
           project: "test/fixture/fixture.kapi"
-          commit: "false"
 
       - name: Verify plan outputs
         env:
@@ -68,7 +67,6 @@ jobs:
           command: check
           args: "--ship"
           project: "test/fixture/fixture.kapi"
-          commit: "false"
 
       - name: Verify gate contract
         env:
@@ -96,7 +94,6 @@ jobs:
         with:
           command: check
           args: "test/fixture/content/en.json"
-          commit: "false"
 
       - name: Verify pass
         env:
@@ -122,7 +119,7 @@ jobs:
           args: "test/fixture/content/en.json --target-lang qps"
 
       # The produced en_qps.json is gitignored by the fixture, so the action
-      # must report no-changes rather than trying to commit.
+      # must report no-changes with nothing for a delivery step.
       - name: Verify no-changes path
         env:
           STATUS: ${{ steps.pseudo.outputs.status }}
