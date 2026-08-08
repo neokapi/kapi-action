@@ -1,5 +1,5 @@
 name: "Kapi Run"
-description: "Run kapi commands — catch up translations, gate content quality, plan cost — and deliver the results as a commit or pull request"
+description: "Run kapi commands — catch up translations, gate content quality, plan cost — and report what changed. Delivery (commit, push, PR) is your workflow's own step"
 branding:
   icon: "refresh-cw"
   color: "blue"
@@ -28,40 +28,10 @@ inputs:
     description: >-
       With `command: up`, fail the workflow when the run parks (work remains that
       the loop could not carry to the ship gate). Parked is normal pending work,
-      not a broken run, so the default is to commit what it caught up and
+      not a broken run, so the default is to report what it caught up and
       annotate the rest.
     required: false
     default: "false"
-  commit:
-    description: "Whether to commit translation changes"
-    required: false
-    default: "true"
-  commit-message:
-    description: "Commit message"
-    required: false
-    default: "chore: update translations via kapi"
-  create-pull-request:
-    description: >-
-      Deliver changes as a pull request instead of pushing to the current
-      branch. Needs `permissions: pull-requests: write` (plus contents: write).
-    required: false
-    default: "false"
-  pr-title:
-    description: "Title for the created pull request"
-    required: false
-    default: "chore: update translations via kapi"
-  pr-labels:
-    description: "Comma-separated labels for the created pull request"
-    required: false
-    default: "translations,kapi"
-  pr-base:
-    description: "Base branch for the created pull request (empty = repository default branch)"
-    required: false
-    default: ""
-  branch-prefix:
-    description: "Branch name prefix for pull-request delivery"
-    required: false
-    default: "kapi/up"
   pr-comment:
     description: >-
       On pull-request events, post one sticky comment with the report (plan,
@@ -70,19 +40,11 @@ inputs:
     required: false
     default: "false"
   token:
-    description: "GitHub token for PR creation and comments"
+    description: "GitHub token for the sticky PR comment"
     required: false
     default: ${{ github.token }}
-  git-user-name:
-    description: "Git committer name"
-    required: false
-    default: "Kapi Bot"
-  git-user-email:
-    description: "Git committer email"
-    required: false
-    default: "bot@kapi.dev"
   paths:
-    description: "Space-separated paths to stage for commit"
+    description: "Space-separated paths to scan for changes (empty = whole working tree)"
     required: false
     default: ""
 
@@ -114,15 +76,12 @@ outputs:
   plan-token-estimate:
     description: "With `plan: true`: estimated tokens for the remaining units"
     value: ${{ steps.run-kapi.outputs.plan-token-estimate }}
-  committed:
-    description: "Whether a commit was created"
-    value: ${{ steps.set-outputs.outputs.committed }}
-  commit-sha:
-    description: "SHA of the created commit (empty if no commit)"
-    value: ${{ steps.set-outputs.outputs.commit-sha }}
-  pull-request-url:
-    description: "URL of the created pull request (empty if none)"
-    value: ${{ steps.deliver.outputs.pr-url }}
+  has-changes:
+    description: "Whether the run left changes in the working tree for your delivery step"
+    value: ${{ steps.check-changes.outputs.has_changes }}
+  changed-files:
+    description: "Newline-separated paths the run changed (git status --porcelain paths)"
+    value: ${{ steps.check-changes.outputs.changed_files }}
 
 runs:
   using: "composite"
@@ -229,8 +188,9 @@ runs:
 
         printf 'Running:'; printf ' %q' "${cmd[@]}"; echo
 
-        # A failed or canceled run exits non-zero: this step fails, and nothing
-        # below it commits. A broken run must never quietly commit partial work.
+        # A failed or canceled run exits non-zero: this step fails, and
+        # has-changes never reports — a broken run must never hand a delivery
+        # step partial work as if it were a finished one.
         if [ -n "$STREAM" ]; then
           if ! "${cmd[@]}" | tee "$STREAM"; then
             echo "run_status=failed" >> "$GITHUB_OUTPUT"
@@ -282,8 +242,8 @@ runs:
 
         echo "Run ${OUTCOME} after ${PASSES} pass(es)."
         if [ "$OUTCOME" = "parked" ]; then
-          # Parked is pending work, not a broken run: what it caught up is real
-          # progress and still gets committed below.
+          # Parked is pending work, not a broken run: what it caught up is
+          # real progress and still reaches has-changes/changed-files.
           echo "::warning::Translations parked${PARKED:+ for: ${PARKED}} — work remains that the loop could not carry to the ship gate."
           if [ "$FAIL_ON_PARKED" = "true" ]; then
             echo "::error::fail-on-parked is set and the run parked"
@@ -324,82 +284,11 @@ runs:
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
         else
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Commit and deliver changes
-      id: deliver
-      if: inputs.plan != 'true' && inputs.commit == 'true' && steps.check-changes.outputs.has_changes == 'true'
-      shell: bash
-      env:
-        GIT_USER_NAME: ${{ inputs.git-user-name }}
-        GIT_USER_EMAIL: ${{ inputs.git-user-email }}
-        COMMIT_MESSAGE: ${{ inputs.commit-message }}
-        PATHS: ${{ inputs.paths }}
-        CREATE_PR: ${{ inputs.create-pull-request }}
-        PR_TITLE: ${{ inputs.pr-title }}
-        PR_LABELS: ${{ inputs.pr-labels }}
-        PR_BASE: ${{ inputs.pr-base }}
-        BRANCH_PREFIX: ${{ inputs.branch-prefix }}
-        GH_TOKEN: ${{ inputs.token }}
-        RUN_ID: ${{ github.run_id }}
-        OUTCOME: ${{ steps.run-kapi.outputs.outcome }}
-        PASSES: ${{ steps.run-kapi.outputs.passes }}
-        PARKED: ${{ steps.run-kapi.outputs.parked-locales }}
-      run: |
-        set -euo pipefail
-        git config user.name "$GIT_USER_NAME"
-        git config user.email "$GIT_USER_EMAIL"
-
-        if [ -z "$PATHS" ]; then
-          git add -A
-        else
-          # shellcheck disable=SC2086  # deliberate word-splitting over the path list
-          for p in $PATHS; do
-            if [ -e "$p" ]; then
-              git add -A "$p"
-            fi
-          done
-        fi
-
-        # Staging can still come up empty (everything the run touched is
-        # gitignored); committing nothing would fail the step for no reason.
-        if git diff --cached --quiet; then
-          echo "Nothing staged after all — skipping commit."
-          exit 0
-        fi
-
-        if [ "$CREATE_PR" != "true" ]; then
-          git commit -m "$COMMIT_MESSAGE"
-          git push
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-
-        BRANCH="${BRANCH_PREFIX}-${RUN_ID}"
-        git checkout -b "$BRANCH"
-        git commit -m "$COMMIT_MESSAGE"
-        git push -u origin "$BRANCH"
-        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-        BODY="<!-- kapi-convergence-report -->
-        ## kapi up report
-
-        | | |
-        |---|---|
-        | Outcome | **${OUTCOME:-—}** |
-        | Passes | ${PASSES:-—} |
-        | Parked locales | ${PARKED:-—} |
-
-        Produced by [kapi-action](https://github.com/neokapi/kapi-action). Parked scopes need a person — see the run log for the gate each one is short of."
-        PR_ARGS=(--title "$PR_TITLE" --body "$BODY" --head "$BRANCH")
-        [ -n "$PR_BASE" ] && PR_ARGS+=(--base "$PR_BASE")
-        PR_URL=$(gh pr create "${PR_ARGS[@]}")
-        echo "pr-url=${PR_URL}" >> "$GITHUB_OUTPUT"
-        echo "Opened ${PR_URL}"
-        # Labels are best-effort: gh fails when a label doesn't exist in the
-        # repo, and a missing label must never fail a delivered run.
-        if [ -n "$PR_LABELS" ]; then
-          gh pr edit "$PR_URL" --add-label "$PR_LABELS" || echo "::notice::could not add labels '${PR_LABELS}' (create them in the repo to label kapi PRs)"
+          {
+            echo "changed_files<<KAPI_EOF"
+            awk '{ print substr($0, 4) }' <<< "$DIRT"
+            echo "KAPI_EOF"
+          } >> "$GITHUB_OUTPUT"
         fi
 
     - name: Sticky PR comment
@@ -475,18 +364,10 @@ runs:
       shell: bash
       env:
         HAS_CHANGES: ${{ steps.check-changes.outputs.has_changes }}
-        COMMIT_SHA: ${{ steps.deliver.outputs.sha }}
       run: |
         set -euo pipefail
         if [ "$HAS_CHANGES" = "true" ]; then
           echo "status=success" >> "$GITHUB_OUTPUT"
         else
           echo "status=no-changes" >> "$GITHUB_OUTPUT"
-        fi
-        if [ -n "$COMMIT_SHA" ]; then
-          echo "committed=true" >> "$GITHUB_OUTPUT"
-          echo "commit-sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
-        else
-          echo "committed=false" >> "$GITHUB_OUTPUT"
-          echo "commit-sha=" >> "$GITHUB_OUTPUT"
         fi
