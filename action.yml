@@ -62,8 +62,18 @@ outputs:
     description: "With `command: up`: comma-separated locales still short of their gate"
     value: ${{ steps.run-kapi.outputs.parked-locales }}
   gate:
-    description: "With `command: check`: `pass` or `fail`"
+    description: "With `command: check`: `pass` or `fail` (empty when the check did not run or errored)"
     value: ${{ steps.run-kapi.outputs.gate }}
+  result:
+    description: "With `command: check`: `passed`, `failed`, `did_not_run`, or `error`"
+    value: ${{ steps.run-kapi.outputs.result }}
+  did_not_run_cause:
+    description: >-
+      With `command: check`, when `result` is `did_not_run`: `checker_invalid`
+      (a checker failed its canary, so the result cannot be trusted),
+      `nothing_to_check`, `content_not_checked`, or `unknown` when kapi's
+      output named no cause
+    value: ${{ steps.run-kapi.outputs.did_not_run_cause }}
   plan-missing:
     description: "With `plan: true`: pending units across all locales"
     value: ${{ steps.run-kapi.outputs.plan-missing }}
@@ -140,22 +150,29 @@ runs:
           exit 0
         fi
 
-        # ---------- check: the quality gate, with a distinct exit-3 signal ----------
+        # ---------- check: the quality gate, with distinct exit-3 and exit-4 signals ----------
         if [ "$COMMAND" = "check" ]; then
           printf 'Running:'; printf ' %q' "${cmd[@]}"; echo
-          # || rc=$? keeps the gate's exit code without tripping errexit — the
-          # annotation, summary, and outputs must still publish on a failing gate.
+          # || rc=$? keeps the check's exit code without tripping errexit, so the
+          # annotation, summary, and outputs still publish when it fails.
+          CHECK_OUTPUT="${RUNNER_TEMP}/kapi-check-output.txt"
           rc=0
-          "${cmd[@]}" | tee "${RUNNER_TEMP}/kapi-check-output.txt" || rc=$?
+          "${cmd[@]}" | tee "$CHECK_OUTPUT" || rc=$?
           if [ "$rc" -eq 0 ]; then
-            echo "gate=pass" >> "$GITHUB_OUTPUT"
+            {
+              echo "gate=pass"
+              echo "result=passed"
+            } >> "$GITHUB_OUTPUT"
             {
               echo "## kapi check"
               echo
               echo "✅ **Gate: pass**"
             } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$rc" -eq 3 ]; then
-            echo "gate=fail" >> "$GITHUB_OUTPUT"
+            {
+              echo "gate=fail"
+              echo "result=failed"
+            } >> "$GITHUB_OUTPUT"
             {
               echo "## kapi check"
               echo
@@ -163,8 +180,70 @@ runs:
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error::kapi gate unmet (exit 3) — content quality gates failed; read the findings and fix them. This is 'not on-spec yet', not a crash."
             exit 3
+          elif [ "$rc" -eq 4 ]; then
+            # Exit 4: the check did not run, so it reached no verdict. kapi names
+            # the cause in the report it printed: `did_not_run_cause` in JSON or
+            # YAML, and a text sentence ending in "(<cause>)". The command line
+            # is the caller's, so read whichever format it produced, with color
+            # codes removed. Older kapi releases never exit 4.
+            PLAIN_OUTPUT="${RUNNER_TEMP}/kapi-check-output.plain.txt"
+            esc="$(printf '\033')"
+            sed "s/${esc}\[[0-9;]*m//g" "$CHECK_OUTPUT" > "$PLAIN_OUTPUT"
+            CAUSE=""
+            if jq -e 'type == "object"' "$PLAIN_OUTPUT" > /dev/null 2>&1; then
+              CAUSE="$(jq -r '.did_not_run_cause // empty | strings' "$PLAIN_OUTPUT")"
+            fi
+            if [ -z "$CAUSE" ]; then
+              CAUSE="$(sed -n -E \
+                -e 's/^did_not_run_cause:[[:space:]]*"?([a-z_]+)"?[[:space:]]*$/\1/p' \
+                -e 's/.*Did not run: .*\(([a-z_]+)\)[[:space:]]*$/\1/p' \
+                "$PLAIN_OUTPUT" | tail -n 1)"
+            fi
+            case "$CAUSE" in
+              "" | *[!a-z_]*) CAUSE="unknown" ;;
+            esac
+            case "$CAUSE" in
+              checker_invalid)
+                SUMMARY="a checker failed its canary, so this run's result cannot be trusted"
+                ADVICE="Read it as neither a pass nor a gate failure: fix or report the checker the log names, then re-run."
+                ;;
+              nothing_to_check)
+                SUMMARY="there was nothing in scope to check"
+                ADVICE="No content reached the check. Confirm the recipe's content paths or the files passed in args."
+                ;;
+              content_not_checked)
+                SUMMARY="content in scope was not checked"
+                ADVICE="A requested gate or analyzer had nothing bound, or a changed file could not be checked. The log names which."
+                ;;
+              unknown)
+                SUMMARY="kapi's output named no cause"
+                ADVICE="Read the job log for the reason."
+                ;;
+              *)
+                SUMMARY="kapi gave a cause this version of the action does not describe"
+                ADVICE="Read the job log for the reason."
+                ;;
+            esac
+            {
+              echo "result=did_not_run"
+              echo "did_not_run_cause=${CAUSE}"
+            } >> "$GITHUB_OUTPUT"
+            ICON="⚠️"
+            if [ "$CAUSE" = "checker_invalid" ]; then
+              ICON="❌"
+            fi
+            {
+              echo "## kapi check"
+              echo
+              echo "${ICON} **Did not run** (\`${CAUSE}\`): ${SUMMARY}. ${ADVICE}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::kapi check did not run (exit 4, ${CAUSE}): ${SUMMARY}. ${ADVICE}"
+            exit 4
           else
-            echo "run_status=failed" >> "$GITHUB_OUTPUT"
+            {
+              echo "run_status=failed"
+              echo "result=error"
+            } >> "$GITHUB_OUTPUT"
             echo "::error::kapi check failed operationally (exit ${rc})"
             exit "$rc"
           fi

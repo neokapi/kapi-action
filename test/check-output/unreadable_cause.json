@@ -1,0 +1,15 @@
+{
+  "schema": "kapi.check/v1",
+  "pass": false,
+  "verdict": "did_not_run",
+  "did_not_run": [
+    "a cause that is not a cause code, including a line break that would write a second output"
+  ],
+  "did_not_run_cause": "Nothing To Check\nresult=passed",
+  "target": {
+    "kind": "file",
+    "file": "content/en.json",
+    "blocks": 0
+  },
+  "findings": []
+}

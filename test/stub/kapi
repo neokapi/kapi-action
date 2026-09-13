@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# A stand-in for the kapi CLI, for testing how the action maps kapi's exit code
+# and output to its own outputs. It prints the file named by KAPI_STUB_OUTPUT
+# and exits with KAPI_STUB_EXIT. When KAPI_STUB_ARGV is set, it records the
+# arguments it was called with there, one per line.
+set -euo pipefail
+
+if [ -n "${KAPI_STUB_ARGV:-}" ]; then
+  printf '%s\n' "$@" > "$KAPI_STUB_ARGV"
+fi
+if [ -n "${KAPI_STUB_OUTPUT:-}" ]; then
+  cat "$KAPI_STUB_OUTPUT"
+fi
+exit "${KAPI_STUB_EXIT:-0}"

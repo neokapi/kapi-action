@@ -1,0 +1,7 @@
+  No findings.
+
+[38;2;200;103;3mDID NOT RUN[0m configured checks: score 100/100 · 0 finding(s) (0 critical, 0 major, 0 minor)
+  [38;2;200;103;3mDid not run: there was nothing in scope to check.[0m (nothing_to_check)
+  Coverage: 1 completed, 6 not run or unsupported. Score covers reported findings only.
+  did not run: no content blocks were checked
+  Context: content/empty.json; voice none (none); terms none loaded

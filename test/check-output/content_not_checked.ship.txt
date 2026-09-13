@@ -1,0 +1,12 @@
+  gate   result       findings  content checked
+  voice  DID NOT RUN  1
+
+voice:
+
+  severity  location  message
+  ERROR     —         voice gate was requested with --gate voice but the project binds no defaults.voice, so there is nothing to check
+                      ↳ add defaults.voice to the kapi.yaml recipe, or drop --gate voice to skip this gate
+
+DID NOT RUN: 1 gate(s), 0 passed, 0 failed, 1 did not run, 1 finding(s) (1 error, 0 warning)
+  Did not run: content in scope was not checked. (content_not_checked)
+  did not run: voice: --gate voice was requested but the project binds no defaults.voice

@@ -1,0 +1,7 @@
+  No findings.
+
+DID NOT RUN configured checks: score 100/100 · 0 finding(s) (0 critical, 0 major, 0 minor)
+  Did not run: a checker failed its canary, so this run's result cannot be trusted. (checker_invalid)
+  Coverage: 0 completed, 6 not run or unsupported, 1 missed a canary. Score covers reported findings only.
+  did not run: hygiene reported no finding on its canary on content/en.json, so its result cannot be trusted
+  Context: content/en.json; voice none (none); terms none loaded
