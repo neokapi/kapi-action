@@ -2,12 +2,13 @@ name: Test
 
 # Keyless self-tests against the fixture project in test/fixture — plan mode
 # and check need no provider or server credentials. The CLI version is pinned
-# to the first release that ships `kapi up` / `check --ship`; bump
-# deliberately.
+# to a release that reads the fixture's `collections:` recipe (1.2.0-rc17 or
+# later); bump deliberately.
 #
-# The check-outcome jobs put a kapi stub (test/stub/kapi) on PATH instead, so
-# each exit code kapi check can end with, and each did-not-run cause, is
-# exercised whatever the pinned release can produce.
+# The check-outcome and reporting jobs put stubs (test/stub) on PATH instead:
+# a kapi that exits with a chosen code, and a gh that records the sticky PR
+# comment rather than posting it. Every exit code kapi check can end with, and
+# each did-not-run cause, is exercised whatever the pinned release can produce.
 
 on:
   push:
@@ -19,7 +20,7 @@ on:
   workflow_dispatch:
 
 env:
-  KAPI_VERSION: "1.2.0-rc14"
+  KAPI_VERSION: "1.2.0-rc29"
 
 jobs:
   test-plan:
@@ -30,7 +31,7 @@ jobs:
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: "1.2.0-rc14"
+          version: ${{ env.KAPI_VERSION }}
           plugins: ""
 
       - name: Run plan
@@ -57,7 +58,7 @@ jobs:
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: "1.2.0-rc14"
+          version: ${{ env.KAPI_VERSION }}
           plugins: ""
 
       # The fixture is deliberately untranslated: the ship gate must FAIL the
@@ -77,11 +78,13 @@ jobs:
           STEP_OUTCOME: ${{ steps.gate.outcome }}
           GATE: ${{ steps.gate.outputs.gate }}
           RESULT: ${{ steps.gate.outputs.result }}
+          STATUS: ${{ steps.gate.outputs.status }}
         run: |
-          echo "step outcome: ${STEP_OUTCOME}, gate: ${GATE}, result: ${RESULT}"
+          echo "step outcome: ${STEP_OUTCOME}, gate: ${GATE}, result: ${RESULT}, status: ${STATUS}"
           test "${STEP_OUTCOME}" = "failure"
           test "${GATE}" = "fail"
           test "${RESULT}" = "failed"
+          test "${STATUS}" = "failed"
 
   test-check-file:
     name: "check <files> (file-mode pass)"
@@ -91,7 +94,7 @@ jobs:
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: "1.2.0-rc14"
+          version: ${{ env.KAPI_VERSION }}
           plugins: ""
 
       - name: Gate the fixture source file
@@ -209,7 +212,7 @@ jobs:
           # expect STEP OUTCOME RESULT GATE CAUSE
           expect() {
             local got want
-            got="$(jq -r --arg id "$1" '.[$id] | [.outcome, (.outputs.result // ""), (.outputs.gate // ""), (.outputs.did_not_run_cause // "")] | join(" | ")' <<< "$STEPS")"
+            got="$(jq -r --arg id "$1" '.[$id] | [.outcome, (.outputs.result // ""), (.outputs.gate // ""), (.outputs["did-not-run-cause"] // "")] | join(" | ")' <<< "$STEPS")"
             want="$2 | $3 | $4 | $5"
             if [ "$got" = "$want" ]; then
               echo "ok   $1: $got"
@@ -228,14 +231,126 @@ jobs:
           expect error                failure error       ""   ""
           exit "$status"
 
+  test-check-reporting:
+    name: "reporting after a failing check (kapi and gh stubs)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Put the stubs on PATH
+        run: echo "${GITHUB_WORKSPACE}/test/stub" >> "$GITHUB_PATH"
+
+      # Each run asks for the sticky PR comment, and the gh stub records the
+      # body instead of posting it. The action comments only on pull_request
+      # events, so on a push or a schedule the verify step expects no comment.
+      - name: "exit 0 with pr-comment"
+        id: passed
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/passed.txt
+          KAPI_STUB_EXIT: "0"
+          GH_STUB_LOG: ${{ runner.temp }}/gh-passed
+        with:
+          command: check
+          pr-comment: "true"
+
+      - name: "exit 3 with pr-comment"
+        id: failed
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/failed.txt
+          KAPI_STUB_EXIT: "3"
+          GH_STUB_LOG: ${{ runner.temp }}/gh-failed
+        with:
+          command: check
+          args: "--ship"
+          pr-comment: "true"
+
+      - name: "exit 4 with pr-comment"
+        id: did_not_run
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/checker_invalid.txt
+          KAPI_STUB_EXIT: "4"
+          GH_STUB_LOG: ${{ runner.temp }}/gh-did_not_run
+        with:
+          command: check
+          pr-comment: "true"
+
+      - name: Verify the reports, and that the check still failed
+        env:
+          STEPS: ${{ toJSON(steps) }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_LOGS: ${{ runner.temp }}
+        run: |
+          status=0
+          expect() {
+            if [ "$2" = "$3" ]; then
+              echo "ok   $1: $2"
+            else
+              echo "::error::$1: got '$2', want '$3'"
+              status=1
+            fi
+          }
+          # value STEP FILTER reads one field of a step from the steps context.
+          value() {
+            jq -r --arg id "$1" ".[\$id] | $2 // \"\"" <<< "$STEPS"
+          }
+          # comment STEP TEXT: on a pull_request event the body the action
+          # posted must contain TEXT; on any other event it must post nothing.
+          comment() {
+            local body="${GH_LOGS}/gh-$1/body.md"
+            if [ "$EVENT_NAME" != "pull_request" ]; then
+              if [ -e "$body" ]; then
+                echo "::error::$1: a comment was posted on a ${EVENT_NAME} event"
+                status=1
+              else
+                echo "ok   $1: no comment on a ${EVENT_NAME} event"
+              fi
+            elif [ ! -f "$body" ]; then
+              echo "::error::$1: no comment was posted"
+              status=1
+            elif grep -qF -- "$2" "$body"; then
+              echo "ok   $1: the comment contains: $2"
+            else
+              echo "::error::$1: the comment lacks: $2"
+              sed 's/^/     > /' "$body"
+              status=1
+            fi
+          }
+
+          # The action step itself fails on exit 3 and exit 4, which is what
+          # fails a job that does not set continue-on-error.
+          expect "passed outcome" "$(value passed .outcome)" success
+          expect "failed outcome" "$(value failed .outcome)" failure
+          expect "did_not_run outcome" "$(value did_not_run .outcome)" failure
+
+          # The reporting steps still ran after the failing check.
+          expect "passed status" "$(value passed .outputs.status)" no-changes
+          expect "failed status" "$(value failed .outputs.status)" failed
+          expect "did_not_run status" "$(value did_not_run .outputs.status)" failed
+          expect "passed has-changes" "$(value passed '.outputs["has-changes"]')" false
+          expect "failed has-changes" "$(value failed '.outputs["has-changes"]')" false
+          expect "did_not_run has-changes" "$(value did_not_run '.outputs["has-changes"]')" false
+          expect "did_not_run did-not-run-cause" "$(value did_not_run '.outputs["did-not-run-cause"]')" checker_invalid
+
+          comment passed "✅ **Gate: pass**"
+          comment failed "❌ **Gate: unmet**"
+          comment did_not_run "❌ **Did not run** (\`checker_invalid\`): a checker failed its canary, so this run's result cannot be trusted."
+          exit "$status"
+
   test-check-annotations:
     name: "check outcomes: exit codes, outputs and annotations (kapi stub)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      # Runs the action's own step script once per outcome, including the
-      # did-not-run causes read from text, JSON, YAML and colored output.
+      # Runs the action's own step scripts once per outcome, including the
+      # did-not-run causes read from text, JSON, YAML and colored output, and
+      # the sticky PR comment each outcome renders.
       - name: Run the check-outcome harness
         run: |
           yq --version
@@ -249,7 +364,7 @@ jobs:
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: "1.2.0-rc14"
+          version: ${{ env.KAPI_VERSION }}
           plugins: ""
 
       - name: Pseudo-translate the fixture

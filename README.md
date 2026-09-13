@@ -181,11 +181,13 @@ jobs:
 
 Ordinary builds never fail on target-language drift — a locale that is behind is pending work, not an error. `check --ship` is the explicit, opt-in enforcement point.
 
+A failing gate still reports: `status` is `failed`, `has-changes` is set, and with `pr-comment` the sticky comment shows the result. The step keeps the gate's exit code, so the job fails.
+
 #### When a check does not run
 
-A check can also end without a verdict. kapi exits `4` when the check did not run: it checked no content, or it could not show that its checkers are able to fail. The Action fails the step and reports this as its own result: `result` is `did_not_run`, `gate` stays empty, and `did_not_run_cause` carries the cause kapi named. The step's error annotation and the job summary state the cause in words.
+A check can also end without a verdict. kapi exits `4` when the check did not run: it checked no content, or it could not show that its checkers are able to fail. The Action fails the step and reports this as its own result: `result` is `did_not_run`, `gate` stays empty, `status` is `failed`, and `did-not-run-cause` carries the cause kapi named. The step's error annotation, the job summary and, with `pr-comment`, the sticky PR comment state the cause in words.
 
-| `did_not_run_cause` | What it means |
+| `did-not-run-cause` | What it means |
 |---|---|
 | `checker_invalid` | A checker failed its canary, so the run's result cannot be trusted. Read it as neither a pass nor a gate failure, and fix or report the checker. |
 | `nothing_to_check` | There was nothing in scope to check. |
@@ -232,7 +234,7 @@ Server-connected projects don't need this — the project state lives on the ser
 | `project` | | Path to the `kapi.yaml` recipe (`-p` flag) |
 | `plan` | `false` | With `command: up`: dry run — pending work, TM leverage, token estimate; no writes, no provider calls |
 | `fail-on-parked` | `false` | With `command: up`, fail the workflow when the run parks instead of reporting partial progress |
-| `pr-comment` | `false` | Sticky report comment on pull-request events |
+| `pr-comment` | `false` | Sticky report comment on pull-request events, including for a failed gate or a check that did not run |
 | `token` | `${{ github.token }}` | Token for the sticky PR comment |
 | `paths` | | Space-separated paths to scan for changes (whole working tree if empty) |
 
@@ -240,13 +242,13 @@ Server-connected projects don't need this — the project state lives on the ser
 
 | Output | Description |
 |---|---|
-| `status` | `success`, `no-changes`, or `failed` |
+| `status` | `success`, `no-changes`, or `failed` (with `command: check`: a failed gate or a check that did not run) |
 | `outcome` | With `command: up`: `converged` or `parked` (a failed run fails the step, so it never reaches an output) |
 | `passes` | With `command: up`: how many reconciliation passes the run took |
 | `parked-locales` | With `command: up`: comma-separated locales still short of their gate |
 | `gate` | With `command: check`: `pass` or `fail` (empty when the check did not run or errored) |
 | `result` | With `command: check`: `passed` (exit 0), `failed` (exit 3), `did_not_run` (exit 4), or `error` (any other exit code) |
-| `did_not_run_cause` | With `command: check`, when `result` is `did_not_run`: `checker_invalid`, `nothing_to_check`, `content_not_checked`, or `unknown` |
+| `did-not-run-cause` | With `command: check`, when `result` is `did_not_run`: `checker_invalid`, `nothing_to_check`, `content_not_checked`, or `unknown` |
 | `plan-missing` / `plan-tm-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals |
 | `has-changes` | Whether the run left changes in the working tree for your delivery step |
 | `changed-files` | Newline-separated paths the run changed |

@@ -6,29 +6,12 @@ defaults:
     - fr
     - de
 
-# Define content and flows. Each bare content entry maps a source glob to a
-# target; kapi tools read the source content and edit, check, or translate it.
-# The {lang} placeholder in a target fans output out per language. Runtime block
-# state lives in .kapi/cache/blocks.db.
-#
-# content:
-#   - path: "src/locales/en/*.json"
-#     format: json
-#     target: "src/locales/{lang}/*.json"
-#
-# flows:
-#   # Monolingual: check source content against brand voice and terminology.
-#   brand-check:
-#     steps:
-#       - tool: brand-vocab-check
-#       - tool: brand-voice-check
-#   # Multilingual: translate the source into each target language.
-#   translate:
-#     steps:
-#       - tool: translate
-#
-# Tip: 'kapi init --framework <stack>' pre-fills content for a known stack.
-content:
-  - path: "content/en.json"
-    target: "content/{lang}.json"
-flows: {}
+# One source file whose French and German targets are deliberately absent, so
+# the plan has pending work and the ship gate fails. A collection groups the
+# content kapi reads; each entry maps a source path to its target, and {lang}
+# fans the target out per language.
+collections:
+  - name: app
+    content:
+      - path: "content/en.json"
+        target: "content/{lang}.json"
