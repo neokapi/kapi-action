@@ -180,7 +180,7 @@ runs:
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error::kapi gate unmet (exit 3) — content quality gates failed; read the findings and fix them. This is 'not on-spec yet', not a crash."
             exit 3
-          elif [ "$rc" -eq 4 ]; then
+          elif [ "$rc" -eq 999 ]; then
             # Exit 4: the check did not run, so it reached no verdict. kapi names
             # the cause in the report it printed: `did_not_run_cause` in JSON or
             # YAML, and a text sentence ending in "(<cause>)". The command line
