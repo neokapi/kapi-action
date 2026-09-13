@@ -4,6 +4,10 @@ name: Test
 # and check need no provider or server credentials. The CLI version is pinned
 # to the first release that ships `kapi up` / `check --ship`; bump
 # deliberately.
+#
+# The check-outcome jobs put a kapi stub (test/stub/kapi) on PATH instead, so
+# each exit code kapi check can end with, and each did-not-run cause, is
+# exercised whatever the pinned release can produce.
 
 on:
   push:
@@ -72,10 +76,12 @@ jobs:
         env:
           STEP_OUTCOME: ${{ steps.gate.outcome }}
           GATE: ${{ steps.gate.outputs.gate }}
+          RESULT: ${{ steps.gate.outputs.result }}
         run: |
-          echo "step outcome: ${STEP_OUTCOME}, gate: ${GATE}"
+          echo "step outcome: ${STEP_OUTCOME}, gate: ${GATE}, result: ${RESULT}"
           test "${STEP_OUTCOME}" = "failure"
           test "${GATE}" = "fail"
+          test "${RESULT}" = "failed"
 
   test-check-file:
     name: "check <files> (file-mode pass)"
@@ -98,7 +104,142 @@ jobs:
       - name: Verify pass
         env:
           GATE: ${{ steps.check.outputs.gate }}
-        run: test "${GATE}" = "pass"
+          RESULT: ${{ steps.check.outputs.result }}
+        run: |
+          test "${GATE}" = "pass"
+          test "${RESULT}" = "passed"
+
+  test-check-outcomes:
+    name: "check outcomes through the action (kapi stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Put the kapi stub on PATH
+        run: echo "${GITHUB_WORKSPACE}/test/stub" >> "$GITHUB_PATH"
+
+      # One run of the action per outcome. Every run but the first fails its
+      # step on purpose; the last step reads each one's outcome and outputs.
+      - name: "exit 0: passed"
+        id: passed
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/passed.txt
+          KAPI_STUB_EXIT: "0"
+        with:
+          command: check
+
+      - name: "exit 3: failed"
+        id: failed
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/failed.txt
+          KAPI_STUB_EXIT: "3"
+        with:
+          command: check
+          args: "--ship"
+
+      - name: "exit 4: checker_invalid"
+        id: checker_invalid
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/checker_invalid.txt
+          KAPI_STUB_EXIT: "4"
+        with:
+          command: check
+
+      - name: "exit 4: checker_invalid (JSON)"
+        id: checker_invalid_json
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/checker_invalid.json
+          KAPI_STUB_EXIT: "4"
+        with:
+          command: check
+          args: "--json"
+
+      - name: "exit 4: nothing_to_check"
+        id: nothing_to_check
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/nothing_to_check.txt
+          KAPI_STUB_EXIT: "4"
+        with:
+          command: check
+
+      - name: "exit 4: content_not_checked"
+        id: content_not_checked
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_OUTPUT: test/check-output/content_not_checked.ship.txt
+          KAPI_STUB_EXIT: "4"
+        with:
+          command: check
+          args: "--ship --gate voice"
+
+      - name: "exit 4: no cause in the output"
+        id: unknown
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_EXIT: "4"
+        with:
+          command: check
+
+      - name: "exit 1: operational error"
+        id: error
+        continue-on-error: true
+        uses: ./
+        env:
+          KAPI_STUB_EXIT: "1"
+        with:
+          command: check
+
+      - name: Verify each outcome and its outputs
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          status=0
+          # expect STEP OUTCOME RESULT GATE CAUSE
+          expect() {
+            local got want
+            got="$(jq -r --arg id "$1" '.[$id] | [.outcome, (.outputs.result // ""), (.outputs.gate // ""), (.outputs.did_not_run_cause // "")] | join(" | ")' <<< "$STEPS")"
+            want="$2 | $3 | $4 | $5"
+            if [ "$got" = "$want" ]; then
+              echo "ok   $1: $got"
+            else
+              echo "::error::$1: got '$got', want '$want'"
+              status=1
+            fi
+          }
+          expect passed               success passed      pass ""
+          expect failed               failure failed      fail ""
+          expect checker_invalid      failure did_not_run ""   checker_invalid
+          expect checker_invalid_json failure did_not_run ""   checker_invalid
+          expect nothing_to_check     failure did_not_run ""   nothing_to_check
+          expect content_not_checked  failure did_not_run ""   content_not_checked
+          expect unknown              failure did_not_run ""   unknown
+          expect error                failure error       ""   ""
+          exit "$status"
+
+  test-check-annotations:
+    name: "check outcomes: exit codes, outputs and annotations (kapi stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Runs the action's own step script once per outcome, including the
+      # did-not-run causes read from text, JSON, YAML and colored output.
+      - name: Run the check-outcome harness
+        run: |
+          yq --version
+          test/check-outcomes.sh
 
   test-run-keyless:
     name: "pseudo-translate (general runner)"

@@ -1,0 +1,5 @@
+  No findings.
+
+PASS configured checks: score 100/100 · 0 finding(s) (0 critical, 0 major, 0 minor)
+  Coverage: 1 completed, 6 not run or unsupported. Score covers reported findings only.
+  Context: content/en.json; voice none (none); terms none loaded

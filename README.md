@@ -155,7 +155,7 @@ jobs:
 
 ### Gate pull requests on content quality
 
-`command: check` with `--ship` is the release bar: the project's bound quality gates (brand, terminology, QA) plus its ship/source coverage gates. An unmet gate exits `3`, which the Action surfaces as a distinct **"gate unmet"** annotation (not a generic failure) and as the `gate` output:
+`command: check` with `--ship` is the release bar: the project's bound quality gates (brand, terminology, QA) plus its ship/source coverage gates. An unmet gate exits `3`, which the Action surfaces as a distinct **"gate unmet"** annotation (not a generic failure), as `gate: fail` and as `result: failed`:
 
 ```yaml
 name: Ship gate
@@ -176,11 +176,23 @@ jobs:
         with:
           command: check
           args: "--ship"
-          commit: "false"
           pr-comment: "true"
 ```
 
 Ordinary builds never fail on target-language drift — a locale that is behind is pending work, not an error. `check --ship` is the explicit, opt-in enforcement point.
+
+#### When a check does not run
+
+A check can also end without a verdict. kapi exits `4` when the check did not run: it checked no content, or it could not show that its checkers are able to fail. The Action fails the step and reports this as its own result: `result` is `did_not_run`, `gate` stays empty, and `did_not_run_cause` carries the cause kapi named. The step's error annotation and the job summary state the cause in words.
+
+| `did_not_run_cause` | What it means |
+|---|---|
+| `checker_invalid` | A checker failed its canary, so the run's result cannot be trusted. Read it as neither a pass nor a gate failure, and fix or report the checker. |
+| `nothing_to_check` | There was nothing in scope to check. |
+| `content_not_checked` | Content in scope was not checked, for example a gate named with `--gate` that has nothing bound in the recipe, or a changed file whose blocks could not be located. |
+| `unknown` | kapi's output named no cause. |
+
+The Action reads the cause from the report kapi printed, in whichever format `args` asks for (text, `--json`, or `--output-format yaml`), and passes your command line through unchanged. kapi releases that predate the did-not-run verdict never exit `4`; with them the step behaves as before, and `result` is `passed`, `failed`, or `error`.
 
 ### Run any other kapi command
 
@@ -232,7 +244,9 @@ Server-connected projects don't need this — the project state lives on the ser
 | `outcome` | With `command: up`: `converged` or `parked` (a failed run fails the step, so it never reaches an output) |
 | `passes` | With `command: up`: how many reconciliation passes the run took |
 | `parked-locales` | With `command: up`: comma-separated locales still short of their gate |
-| `gate` | With `command: check`: `pass` or `fail` |
+| `gate` | With `command: check`: `pass` or `fail` (empty when the check did not run or errored) |
+| `result` | With `command: check`: `passed` (exit 0), `failed` (exit 3), `did_not_run` (exit 4), or `error` (any other exit code) |
+| `did_not_run_cause` | With `command: check`, when `result` is `did_not_run`: `checker_invalid`, `nothing_to_check`, `content_not_checked`, or `unknown` |
 | `plan-missing` / `plan-tm-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals |
 | `has-changes` | Whether the run left changes in the working tree for your delivery step |
 | `changed-files` | Newline-separated paths the run changed |

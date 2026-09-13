@@ -1,0 +1,36 @@
+{
+  "pass": false,
+  "verdict": "did_not_run",
+  "did_not_run": [
+    "voice: --gate voice was requested but the project binds no defaults.voice"
+  ],
+  "did_not_run_cause": "content_not_checked",
+  "gates": [
+    {
+      "gate": "voice",
+      "pass": false,
+      "verdict": "did_not_run",
+      "did_not_run": [
+        "--gate voice was requested but the project binds no defaults.voice"
+      ],
+      "did_not_run_cause": "content_not_checked",
+      "findings": [
+        {
+          "gate": "voice",
+          "severity": "error",
+          "message": "voice gate was requested with --gate voice but the project binds no defaults.voice, so there is nothing to check",
+          "suggestion": "add defaults.voice to the kapi.yaml recipe, or drop --gate voice to skip this gate"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "gates": 1,
+    "passed": 0,
+    "failed": 0,
+    "did_not_run": 1,
+    "findings": 1,
+    "errors": 1,
+    "warnings": 0
+  }
+}

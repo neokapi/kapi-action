@@ -1,0 +1,83 @@
+did_not_run:
+  - no content blocks were checked
+did_not_run_cause: nothing_to_check
+execution:
+  analyzers:
+    - file: content/empty.json
+      findings: 0
+      id: reader.validation
+      reason: Reader validation was not requested.
+      required: false
+      status: not_requested
+    - canary:
+        probes: 1
+        status: caught
+      duration_ms: 0.045791
+      file: content/empty.json
+      findings: 0
+      id: hygiene
+      required: true
+      status: passed
+    - file: content/empty.json
+      findings: 0
+      id: length
+      reason: No length limit was configured.
+      required: false
+      status: not_requested
+    - file: content/empty.json
+      findings: 0
+      id: pattern
+      reason: No explicit patterns were configured.
+      required: false
+      status: not_requested
+    - file: content/empty.json
+      findings: 0
+      id: voice.rules
+      reason: No voice profile or project terms were bound.
+      required: false
+      status: not_requested
+    - file: content/empty.json
+      findings: 0
+      id: voice.similarity
+      reason: Similarity analysis was not requested.
+      required: false
+      status: not_requested
+    - file: content/empty.json
+      findings: 0
+      id: voice.llm
+      reason: This command does not run semantic review.
+      required: false
+      status: not_requested
+  contexts:
+    - file: content/empty.json
+      terms_applied: false
+      voice:
+        applied: false
+        selection: none
+  timings:
+    analyzers_ms: 0.045791
+    context_ms: 0.004291
+    extraction_ms: 0.086792
+    report_ms: 0.001125
+    total_ms: 0.1615
+findings: []
+gate:
+  failed: []
+  max_critical: 0
+  max_major: -1
+  max_minor: -1
+  min_score: 0
+pass: false
+schema: kapi.check/v1
+summary:
+  critical: 0
+  findings: 0
+  major: 0
+  minor: 0
+  neutral: 0
+  score: 100
+target:
+  blocks: 0
+  file: content/empty.json
+  kind: file
+verdict: did_not_run

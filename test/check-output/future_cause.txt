@@ -1,0 +1,7 @@
+  No findings.
+
+DID NOT RUN configured checks: score 100/100 · 0 finding(s) (0 critical, 0 major, 0 minor)
+  Did not run: a cause a later kapi release introduced. (some_new_cause)
+  Coverage: 1 completed, 6 not run or unsupported. Score covers reported findings only.
+  did not run: a reason a later kapi release gives
+  Context: content/en.json; voice none (none); terms none loaded

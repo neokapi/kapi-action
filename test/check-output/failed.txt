@@ -1,0 +1,12 @@
+  gate    result  findings  content checked
+  checks  FAIL    2         0 file(s), 0 block(s)
+
+checks:
+
+  severity  location              message
+  ERROR     content/de.json [de]  target file is missing, so the content is untranslated
+                                  ↳ translate the source content for this locale
+  ERROR     content/fr.json [fr]  target file is missing, so the content is untranslated
+                                  ↳ translate the source content for this locale
+
+FAIL: 1 gate(s), 0 passed, 1 failed, 0 did not run, 2 finding(s) (2 error, 0 warning)

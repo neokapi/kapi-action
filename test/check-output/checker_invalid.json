@@ -1,0 +1,53 @@
+{
+  "schema": "kapi.check/v1",
+  "pass": false,
+  "verdict": "did_not_run",
+  "did_not_run": [
+    "hygiene reported no finding on its canary on content/en.json, so its result cannot be trusted"
+  ],
+  "did_not_run_cause": "checker_invalid",
+  "target": {
+    "kind": "file",
+    "file": "content/en.json",
+    "blocks": 3
+  },
+  "summary": {
+    "findings": 0,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "neutral": 0,
+    "score": 100
+  },
+  "gate": {
+    "max_critical": 0,
+    "max_major": -1,
+    "max_minor": -1,
+    "min_score": 0,
+    "failed": []
+  },
+  "findings": [],
+  "execution": {
+    "analyzers": [
+      {
+        "id": "hygiene",
+        "status": "invalid",
+        "file": "content/en.json",
+        "required": true,
+        "findings": 0,
+        "duration_ms": 0.062791,
+        "canary": {
+          "status": "missed",
+          "probes": 1
+        }
+      }
+    ],
+    "timings": {
+      "context_ms": 0.004375,
+      "extraction_ms": 0.0975,
+      "analyzers_ms": 0.062791,
+      "report_ms": 0.001334,
+      "total_ms": 0.189416
+    }
+  }
+}
