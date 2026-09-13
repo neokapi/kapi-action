@@ -340,7 +340,7 @@ runs:
     # the partial work of a broken `kapi up`.
     - name: Check for changes
       id: check-changes
-      if: inputs.plan != 'true'
+      if: ${{ !cancelled() && inputs.plan != 'true' && (success() || steps.run-kapi.outputs.result == 'failed' || steps.run-kapi.outputs.result == 'did_not_run') }}
       shell: bash
       env:
         PATHS: ${{ inputs.paths }}
@@ -380,7 +380,7 @@ runs:
 
     - name: Sticky PR comment
       id: pr-comment
-      if: inputs.pr-comment == 'true' && github.event_name == 'pull_request'
+      if: ${{ !cancelled() && inputs.pr-comment == 'true' && github.event_name == 'pull_request' && (success() || steps.run-kapi.outputs.result == 'failed' || steps.run-kapi.outputs.result == 'did_not_run') }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
@@ -461,6 +461,7 @@ runs:
 
     - name: Set outputs
       id: set-outputs
+      if: ${{ !cancelled() && (success() || steps.run-kapi.outputs.result == 'failed' || steps.run-kapi.outputs.result == 'did_not_run') }}
       shell: bash
       env:
         HAS_CHANGES: ${{ steps.check-changes.outputs.has_changes }}
