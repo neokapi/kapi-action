@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# A stand-in for the GitHub CLI, for testing the action's sticky PR comment
+# without calling the GitHub API. It appends each call's arguments to
+# $GH_STUB_LOG/calls and writes the body of a POST or PATCH to
+# $GH_STUB_LOG/body.md. Listing comments returns none, so the action posts a
+# new comment rather than editing one.
+set -euo pipefail
+
+log="${GH_STUB_LOG:?GH_STUB_LOG must name a directory}"
+mkdir -p "$log"
+
+args=()
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-f" ] && [ "${arg#body=}" != "$arg" ]; then
+    printf '%s\n' "${arg#body=}" > "$log/body.md"
+    arg="body=<body.md>"
+  fi
+  args+=("$arg")
+  prev="$arg"
+done
+printf '%s\n' "${args[*]}" >> "$log/calls"

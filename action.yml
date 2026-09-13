@@ -35,7 +35,8 @@ inputs:
   pr-comment:
     description: >-
       On pull-request events, post one sticky comment with the report (plan,
-      `kapi up` outcome, or gate result) that re-runs update in place.
+      `kapi up` outcome, or check result, including a failed gate or a check
+      that did not run) that re-runs update in place.
       Needs `permissions: pull-requests: write`.
     required: false
     default: "false"
@@ -50,7 +51,7 @@ inputs:
 
 outputs:
   status:
-    description: "Run result: success, no-changes, or failed"
+    description: "Run result: success, no-changes, or failed (with `command: check`: a failed gate or a check that did not run)"
     value: ${{ steps.set-outputs.outputs.status }}
   outcome:
     description: "With `command: up`: `converged` or `parked` (empty for other commands)"
@@ -67,13 +68,13 @@ outputs:
   result:
     description: "With `command: check`: `passed`, `failed`, `did_not_run`, or `error`"
     value: ${{ steps.run-kapi.outputs.result }}
-  did_not_run_cause:
+  did-not-run-cause:
     description: >-
       With `command: check`, when `result` is `did_not_run`: `checker_invalid`
       (a checker failed its canary, so the result cannot be trusted),
       `nothing_to_check`, `content_not_checked`, or `unknown` when kapi's
       output named no cause
-    value: ${{ steps.run-kapi.outputs.did_not_run_cause }}
+    value: ${{ steps.run-kapi.outputs.did-not-run-cause }}
   plan-missing:
     description: "With `plan: true`: pending units across all locales"
     value: ${{ steps.run-kapi.outputs.plan-missing }}
@@ -226,7 +227,8 @@ runs:
             esac
             {
               echo "result=did_not_run"
-              echo "did_not_run_cause=${CAUSE}"
+              echo "did-not-run-cause=${CAUSE}"
+              echo "did-not-run-summary=${SUMMARY}. ${ADVICE}"
             } >> "$GITHUB_OUTPUT"
             ICON="⚠️"
             if [ "$CAUSE" = "checker_invalid" ]; then
@@ -330,9 +332,15 @@ runs:
           fi
         fi
 
+    # The reporting steps below also run after the check step failed with a
+    # verdict (a failed gate, or a check that did not run), because reporting
+    # that outcome is what they are for. The job still fails: the check step
+    # already did, and a later step that succeeds does not undo it. A run that
+    # failed any other way reports nothing, so a delivery step is never handed
+    # the partial work of a broken `kapi up`.
     - name: Check for changes
       id: check-changes
-      if: inputs.plan != 'true'
+      if: ${{ !cancelled() && inputs.plan != 'true' && (success() || steps.run-kapi.outputs.result == 'failed' || steps.run-kapi.outputs.result == 'did_not_run') }}
       shell: bash
       env:
         PATHS: ${{ inputs.paths }}
@@ -371,7 +379,8 @@ runs:
         fi
 
     - name: Sticky PR comment
-      if: inputs.pr-comment == 'true' && github.event_name == 'pull_request'
+      id: pr-comment
+      if: ${{ !cancelled() && inputs.pr-comment == 'true' && github.event_name == 'pull_request' && (success() || steps.run-kapi.outputs.result == 'failed' || steps.run-kapi.outputs.result == 'did_not_run') }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
@@ -382,6 +391,9 @@ runs:
         PASSES: ${{ steps.run-kapi.outputs.passes }}
         PARKED: ${{ steps.run-kapi.outputs.parked-locales }}
         GATE: ${{ steps.run-kapi.outputs.gate }}
+        RESULT: ${{ steps.run-kapi.outputs.result }}
+        CAUSE: ${{ steps.run-kapi.outputs.did-not-run-cause }}
+        DID_NOT_RUN_SUMMARY: ${{ steps.run-kapi.outputs.did-not-run-summary }}
         PLAN_MISSING: ${{ steps.run-kapi.outputs.plan-missing }}
         PLAN_TM: ${{ steps.run-kapi.outputs.plan-tm-exact }}
         PLAN_AI: ${{ steps.run-kapi.outputs.plan-ai-remaining }}
@@ -413,6 +425,15 @@ runs:
         ## kapi check
 
         ${HEAD}"
+        elif [ "$RESULT" = "did_not_run" ]; then
+          ICON="⚠️"
+          if [ "$CAUSE" = "checker_invalid" ]; then
+            ICON="❌"
+          fi
+          BODY="${MARKER}
+        ## kapi check
+
+        ${ICON} **Did not run** (\`${CAUSE}\`): ${DID_NOT_RUN_SUMMARY} See the [run log](${RUN_URL}) for the reasons."
         elif [ -n "$OUTCOME" ]; then
           BODY="${MARKER}
         ## kapi up report
@@ -440,12 +461,16 @@ runs:
 
     - name: Set outputs
       id: set-outputs
+      if: ${{ !cancelled() && (success() || steps.run-kapi.outputs.result == 'failed' || steps.run-kapi.outputs.result == 'did_not_run') }}
       shell: bash
       env:
         HAS_CHANGES: ${{ steps.check-changes.outputs.has_changes }}
+        RESULT: ${{ steps.run-kapi.outputs.result }}
       run: |
         set -euo pipefail
-        if [ "$HAS_CHANGES" = "true" ]; then
+        if [ "$RESULT" = "failed" ] || [ "$RESULT" = "did_not_run" ]; then
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+        elif [ "$HAS_CHANGES" = "true" ]; then
           echo "status=success" >> "$GITHUB_OUTPUT"
         else
           echo "status=no-changes" >> "$GITHUB_OUTPUT"
