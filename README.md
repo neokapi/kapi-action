@@ -10,7 +10,7 @@ This action requires the `kapi` CLI to be installed. Use [`neokapi/setup-kapi@v1
 
 ### Bring translations up to date
 
-`kapi up` runs the kapi loop, and is the Action's default. In a server-connected project — a recipe with a `server:` block — it pushes, catches up on the Bowrain server (org keys, shared TM, team review), and pulls the produced targets back. With no server it runs the same loop locally.
+`kapi up` runs the kapi loop, and is the Action's default. It needs kapi 1.2.0 or later, which `neokapi/setup-kapi@v1` installs by default. In a server-connected project, a recipe with a `bowrain:` block, it pushes, catches up on the Bowrain server, and pulls the produced targets back; give setup-kapi the server token. With no server it runs the same loop locally and needs an AI provider key, such as `ANTHROPIC_API_KEY`.
 
 ```yaml
 name: Translations
@@ -29,10 +29,16 @@ jobs:
       - uses: actions/checkout@v6
 
       - uses: neokapi/setup-kapi@v1
+        with:
+          # A recipe with a bowrain: block runs the loop on the server.
+          auth-token: ${{ secrets.BOWRAIN_AUTH_TOKEN }}
 
       - uses: neokapi/kapi-action@v1
+        env:
+          # A project with no server translates locally with your provider key.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
-      # The action reports; delivery is your step. Any commit action works —
+      # The action reports; delivery is your step. Any commit action works,
       # or plain git. See "Delivering the changes" for the PR-based recipe.
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
@@ -76,11 +82,11 @@ flowchart LR
     U --> PASS
     CK -->|every gate met| CV["up to date<br/>changes ready to deliver"]
     CK -->|needs a person| PK["parked<br/>the review queue"]
-    PK --> RV["review & approve<br/>recorded in .kapi-state.json"]
+    PK --> RV["review & approve<br/>committed under .kapi/state"]
     RV -.->|next run sees it| U
 ```
 
-**Parked work is the review queue, not an error.** What the machine couldn't decide waits for a person: review the wording, approve or fix it, and the decision is recorded — in the committed `.kapi-state.json` state store, or on the connected server. Approvals raise the `reviewed` coverage the ship gate measures, so the next run and the next gate see them. `kapi check --ship` (see [Gate pull requests](#gate-pull-requests-on-content-quality)) is what enforces the bar at release time.
+**Parked work is the review queue, not an error.** What the machine couldn't decide waits for a person: review the wording, approve or fix it, and `kapi commit` records the decision under `.kapi/state/`, or the connected server records it. Approvals raise the `reviewed` coverage the ship gate measures, so the next run and the next gate see them. `kapi check --ship` (see [Gate pull requests](#gate-pull-requests-on-content-quality)) is what enforces the bar at release time.
 
 The kapi up report (outcome, passes, parked locales) is always written to the job summary. Under the hood the Action runs `kapi up --json`, an NDJSON stream — one convergence event per line, closed by a single `{"type":"result", ...}` record. That record is the contract; the events are the log. It becomes the `outcome`, `passes`, and `parked-locales` outputs.
 
@@ -155,7 +161,7 @@ jobs:
 
 ### Gate pull requests on content quality
 
-`command: check` with `--ship` is the release bar: the project's bound quality gates (brand, terminology, QA) plus its ship/source coverage gates. An unmet gate exits `3`, which the Action surfaces as a distinct **"gate unmet"** annotation (not a generic failure), as `gate: fail` and as `result: failed`:
+`command: check` with `--ship` is the release bar: the project's bound gates (voice, terminology, rule-based checks) plus its ship and source coverage gates. An unmet gate exits `3`, which the Action surfaces as a distinct **"gate unmet"** annotation (not a generic failure), as `gate: fail` and as `result: failed`:
 
 ```yaml
 name: Ship gate
@@ -213,17 +219,9 @@ This runs `kapi run -p kapi.yaml translate`.
 
 ### Caching
 
-The loop runs incrementally via the project's `.kapi/cache` (block store, extractions), which is gitignored and therefore rebuilt on every fresh runner. Restore it across runs to skip re-extraction:
+`neokapi/setup-kapi@v1` carries kapi's parse cache (`.kapi/work/cache/docs`) between runs. Its `cache-tm` input is on by default for a project with a `kapi.yaml`, so this Action needs no cache step of its own. Set setup-kapi's `project-dir` when the recipe is not at the repository root.
 
-```yaml
-- uses: actions/cache@v5
-  with:
-    path: .kapi/cache
-    key: kapi-cache-${{ hashFiles('kapi.yaml', 'src/locales/en/**') }}
-    restore-keys: kapi-cache-
-```
-
-Server-connected projects don't need this — the project state lives on the server.
+Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets and review state a run produced, and a restored copy changes what `kapi status`, `kapi check --ship` and `kapi up` report.
 
 ## Inputs
 
