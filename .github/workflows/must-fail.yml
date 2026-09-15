@@ -1,0 +1,59 @@
+name: Must fail on main
+
+# Throwaway branch: follows main's README "Caching" recipe with kapi 1.2.0-rc32.
+# kapi no longer writes .kapi/cache, so the save job caches nothing and the
+# restore job finds nothing.
+on:
+  push:
+    branches: [test/main-readme-cache-must-fail]
+
+permissions:
+  contents: read
+
+jobs:
+  readme-cache-save:
+    name: "README recipe: run kapi, then save .kapi/cache"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: neokapi/setup-kapi@v1
+        with:
+          version: "1.2.0-rc32"
+          plugins: ""
+          cache-tm: "false"
+
+      - uses: actions/cache@v5
+        with:
+          path: test/fixture/.kapi/cache
+          key: kapi-cache-${{ github.run_id }}
+          restore-keys: kapi-cache-
+
+      - uses: ./
+        with:
+          command: status
+          project: "test/fixture/fixture.kapi"
+
+      - name: List what kapi wrote under .kapi
+        run: find test/fixture/.kapi -maxdepth 4 | sort
+
+  readme-cache-restore:
+    name: "README recipe: restore .kapi/cache in a later job"
+    needs: readme-cache-save
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: cache
+        uses: actions/cache@v5
+        with:
+          path: test/fixture/.kapi/cache
+          key: kapi-cache-${{ github.run_id }}
+          restore-keys: kapi-cache-
+
+      - name: Require the restored cache
+        env:
+          HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: |
+          echo "cache-hit=${HIT}"
+          test -d test/fixture/.kapi/cache
