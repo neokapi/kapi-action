@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 env:
-  KAPI_VERSION: "1.2.0-rc29"
+  KAPI_VERSION: "1.2.0-rc32"
 
 jobs:
   test-plan:
@@ -39,7 +39,7 @@ jobs:
         uses: ./
         with:
           plan: "true"
-          project: "test/fixture/fixture.kapi"
+          project: "test/fixture/kapi.yaml"
 
       - name: Verify plan outputs
         env:
@@ -71,7 +71,7 @@ jobs:
         with:
           command: check
           args: "--ship"
-          project: "test/fixture/fixture.kapi"
+          project: "test/fixture/kapi.yaml"
 
       - name: Verify gate contract
         env:
@@ -382,3 +382,58 @@ jobs:
         run: |
           test -f test/fixture/content/en_qps.json
           test "${STATUS}" = "no-changes"
+
+  # The README sends callers to setup-kapi's cache-tm for caching rather than a
+  # cache step of their own. The save job runs the action and finds kapi's parse
+  # cache where setup-kapi saves it, and nothing at the retired .kapi/cache path;
+  # the restore job must find that cache in place before the action runs again.
+  test-parse-cache-save:
+    name: "parse cache: written where setup-kapi saves it"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: neokapi/setup-kapi@v1
+        with:
+          version: ${{ env.KAPI_VERSION }}
+          plugins: ""
+          project-dir: test/fixture
+
+      - name: Report status
+        uses: ./
+        with:
+          command: status
+          project: "test/fixture/kapi.yaml"
+
+      - name: Verify the cache paths
+        run: |
+          test -f test/fixture/.kapi/work/cache/docs/index.db
+          test ! -e test/fixture/.kapi/cache
+
+  test-parse-cache-restore:
+    name: "parse cache: restored before the action runs"
+    needs: test-parse-cache-save
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: neokapi/setup-kapi@v1
+        with:
+          version: ${{ env.KAPI_VERSION }}
+          plugins: ""
+          project-dir: test/fixture
+
+      - name: Verify the restored cache
+        run: test -f test/fixture/.kapi/work/cache/docs/index.db
+
+      - name: Report status on the restored cache
+        id: status
+        uses: ./
+        with:
+          command: status
+          project: "test/fixture/kapi.yaml"
+
+      - name: Verify the action reports no changes
+        env:
+          STATUS: ${{ steps.status.outputs.status }}
+        run: test "${STATUS}" = "no-changes"
