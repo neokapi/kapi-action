@@ -2,7 +2,7 @@ name: Test
 
 # Keyless self-tests against the fixture project in test/fixture — plan mode
 # and check need no provider or server credentials. The CLI version is pinned
-# to a release that reads the fixture's `collections:` recipe (1.2.0-rc17 or
+# to a release that reads the fixture's `collections:` recipe (1.2.0 or
 # later); bump deliberately.
 #
 # The check-outcome and reporting jobs put stubs (test/stub) on PATH instead:
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 env:
-  KAPI_VERSION: "1.2.0-rc32"
+  KAPI_VERSION: "1.2.0"
 
 jobs:
   test-plan:
