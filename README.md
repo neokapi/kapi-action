@@ -217,6 +217,40 @@ The Action reads the cause from the report kapi printed, in whichever format `ar
 
 This runs `kapi run -p kapi.yaml translate`.
 
+### Settle suggestions after a merge
+
+A suggestion recorded in the project's context becomes an established rule once a person's signal backs it, and a change reaching the default branch is one: a person reviewed and merged it. Run `kapi context settle --merged` on a push to the default branch to record that evidence and establish what it backs. The same range records the same evidence, so a rerun changes nothing.
+
+The evidence lands in kapi's workspace on the runner, so keep the data directory between runs:
+
+```yaml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  settle:
+    runs-on: ubuntu-latest
+    env:
+      KAPI_DATA_DIR: ${{ github.workspace }}/.kapi-data
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/cache@v4
+        with:
+          path: .kapi-data
+          key: kapi-data-${{ github.run_id }}
+          restore-keys: kapi-data-
+      - uses: neokapi/setup-kapi@v1
+      - uses: neokapi/kapi-action@v1
+        with:
+          command: context
+          args: "settle --merged ${{ github.event.before }}..${{ github.sha }} --merger ${{ github.actor }}"
+```
+
+The pull request is read from the merge commit's subject (`(#412)` or `Merge pull request #412`); pass `--pr` in `args` when it is not there.
+
 ### Caching
 
 `neokapi/setup-kapi@v1` carries kapi's parse cache (`.kapi/work/cache/docs`) between runs. Its `cache-tm` input is on by default for a project with a `kapi.yaml`, so this Action needs no cache step of its own. Set setup-kapi's `project-dir` when the recipe is not at the repository root.
