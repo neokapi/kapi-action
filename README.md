@@ -217,6 +217,36 @@ The Action reads the cause from the report kapi printed, in whichever format `ar
 
 This runs `kapi run -p kapi.yaml translate`.
 
+### Share the project's context
+
+A project whose `kapi.yaml` declares a context backend keeps its terms, voice
+profiles, approved wording and decisions there rather than in files the
+repository carries:
+
+```yaml
+context:
+  backend: git        # the context lives on refs/kapi/context in this repository
+```
+
+`context-sync` moves it around the run: `pull` takes in what the team pushed
+before the command runs, and `true` also pushes what the run recorded after it.
+
+```yaml
+permissions:
+  contents: write     # push the context ref
+steps:
+  - uses: actions/checkout@v5
+  - uses: neokapi/setup-kapi@v1
+  - uses: neokapi/kapi-action@v1
+    with:
+      command: up
+      context-sync: true
+```
+
+A pull request from a fork can pull and cannot push, so use `context-sync: pull`
+there. A pull or push that cannot reach the backend exits with status 5 and
+changes nothing.
+
 ### Caching
 
 `neokapi/setup-kapi@v1` carries kapi's parse cache (`.kapi/work/cache/docs`) between runs. Its `cache-tm` input is on by default for a project with a `kapi.yaml`, so this Action needs no cache step of its own. Set setup-kapi's `project-dir` when the recipe is not at the repository root.
@@ -235,6 +265,7 @@ Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets an
 | `pr-comment` | `false` | Sticky report comment on pull-request events, including for a failed gate or a check that did not run |
 | `token` | `${{ github.token }}` | Token for the sticky PR comment |
 | `paths` | | Space-separated paths to scan for changes (whole working tree if empty) |
+| `context-sync` | `false` | `pull` runs `kapi context pull` before the command; `true` also runs `kapi context push` after it, except in plan mode (kapi 1.3 and later) |
 
 ## Outputs
 
@@ -253,7 +284,7 @@ Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets an
 
 ## Permissions
 
-The action itself needs no write permissions. Your delivery step needs `contents: write` (plus `pull-requests: write` for PR delivery); `pr-comment` needs `pull-requests: write`.
+The action itself needs no write permissions, except that `context-sync: true` with a `git` backend pushes the context ref and needs `contents: write`. Your delivery step needs `contents: write` (plus `pull-requests: write` for PR delivery); `pr-comment` needs `pull-requests: write`.
 
 ## License
 
