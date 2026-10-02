@@ -77,7 +77,7 @@ Passes repeat until every language clears its gate, a pass makes no progress, or
 flowchart LR
     S[source changes] --> U[kapi up]
     subgraph PASS ["each pass, per language behind its gate"]
-        TM["1 · reuse<br/>TM exact matches"] --> AI["2 · translate<br/>AI + terminology"] --> CK["3 · check<br/>placeholders · terms · tags"]
+        MEM["1 · reuse<br/>content memory exact matches"] --> AI["2 · translate<br/>AI + terminology"] --> CK["3 · check<br/>placeholders · terms · tags"]
     end
     U --> PASS
     CK -->|every gate met| CV["up to date<br/>changes ready to deliver"]
@@ -134,7 +134,7 @@ App token instead (both delivery actions above accept a `token:` input).
 
 ### Plan mode: the cost of a change, on its PR
 
-`plan: "true"` dry-runs the kapi loop — pending work, TM leverage, and a token estimate, with no writes and no provider calls (so it needs no API keys). With `pr-comment: "true"` on a pull-request event, the plan lands as one sticky comment that re-runs update in place:
+`plan: "true"` dry-runs the kapi loop and reports pending work, content-memory leverage and a token estimate, with no writes and no provider calls (so it needs no API keys). With `pr-comment: "true"` on a pull-request event, the plan lands as one sticky comment that re-runs update in place:
 
 ```yaml
 name: Translation plan
@@ -157,7 +157,7 @@ jobs:
           pr-comment: "true"
 ```
 
-> "This change leaves **42 unit(s)** of pending translation work: 30 recoverable from TM, 12 for AI (~450 tokens estimated)."
+> "This change leaves **42 unit(s)** of pending translation work: 30 recoverable from content memory, 12 for AI (~450 tokens estimated)."
 
 ### Gate pull requests on content quality
 
@@ -287,9 +287,9 @@ context, settles, and pushes the rules it established.
 
 ### Caching
 
-`neokapi/setup-kapi@v1` carries kapi's parse cache (`.kapi/work/cache/docs`) between runs. Its `cache-tm` input is on by default for a project with a `kapi.yaml`, so this Action needs no cache step of its own. Set setup-kapi's `project-dir` when the recipe is not at the repository root.
+`neokapi/setup-kapi@v1` carries kapi's parse cache (`.kapi/work/cache/docs`) between runs. Its `parse-cache` input is on by default for a project with a `kapi.yaml`, so this Action needs no cache step of its own. Older setup-kapi releases name the input `cache-tm`, and newer ones still accept that name with a deprecation warning. Set setup-kapi's `project-dir` when the recipe is not at the repository root.
 
-Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets and review state a run produced, and a restored copy changes what `kapi status`, `kapi check --ship` and `kapi up` report.
+Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets a run produced, and a restored copy changes what `kapi status`, `kapi check --ship` and `kapi up` report.
 
 ## Inputs
 
@@ -298,7 +298,7 @@ Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets an
 | `command` | `up` | Kapi subcommand to execute |
 | `args` | | Additional arguments |
 | `project` | | Path to the `kapi.yaml` recipe (`-p` flag) |
-| `plan` | `false` | With `command: up`: dry run — pending work, TM leverage, token estimate; no writes, no provider calls |
+| `plan` | `false` | With `command: up`: a dry run reporting pending work, content-memory leverage and a token estimate; no writes, no provider calls |
 | `fail-on-parked` | `false` | With `command: up`, fail the workflow when the run parks instead of reporting partial progress |
 | `pr-comment` | `false` | Sticky report comment on pull-request events, including for a failed gate or a check that did not run |
 | `token` | `${{ github.token }}` | Token for the sticky PR comment |
@@ -316,7 +316,8 @@ Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets an
 | `gate` | With `command: check`: `pass` or `fail` (empty when the check did not run or errored) |
 | `result` | With `command: check`: `passed` (exit 0), `failed` (exit 3), `did_not_run` (exit 4), or `error` (any other exit code) |
 | `did-not-run-cause` | With `command: check`, when `result` is `did_not_run`: `checker_invalid`, `nothing_to_check`, `content_not_checked`, or `unknown` |
-| `plan-missing` / `plan-tm-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals |
+| `plan-missing` / `plan-memory-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals; `plan-memory-exact` counts the units recoverable from exact content-memory matches |
+| `plan-tm-exact` | Deprecated: use `plan-memory-exact`, which holds the same value |
 | `has-changes` | Whether the run left changes in the working tree for your delivery step |
 | `changed-files` | Newline-separated paths the run changed |
 

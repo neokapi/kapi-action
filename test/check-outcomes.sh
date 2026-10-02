@@ -115,7 +115,7 @@ comment_case() {
     GATE="$(output_value gate "$out")" RESULT="$(output_value result "$out")" \
     CAUSE="$(output_value did-not-run-cause "$out")" \
     DID_NOT_RUN_SUMMARY="$(output_value did-not-run-summary "$out")" \
-    PLAN_MISSING="" PLAN_TM="" PLAN_AI="" PLAN_TOKENS="" \
+    PLAN_MISSING="" PLAN_MEMORY="" PLAN_AI="" PLAN_TOKENS="" \
     RUNNER_TEMP="$dir/tmp" \
     bash "$work/comment.sh" > "$dir/comment.stdout" 2>&1 || rc=$?
 

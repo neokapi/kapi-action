@@ -19,8 +19,9 @@ inputs:
     default: ""
   plan:
     description: >-
-      With `command: up`, dry-run instead: report pending work, TM leverage,
-      and a token estimate without writing anything or calling a provider.
+      With `command: up`, dry-run instead: report pending work, content-memory
+      leverage, and a token estimate without writing anything or calling a
+      provider.
       Pairs with `pr-comment` to post the cost of a change on its PR.
     required: false
     default: "false"
@@ -87,9 +88,12 @@ outputs:
   plan-missing:
     description: "With `plan: true`: pending units across all locales"
     value: ${{ steps.run-kapi.outputs.plan-missing }}
+  plan-memory-exact:
+    description: "With `plan: true`: units recoverable from exact content-memory matches"
+    value: ${{ steps.run-kapi.outputs.plan-memory-exact }}
   plan-tm-exact:
-    description: "With `plan: true`: units recoverable from TM exact hits"
-    value: ${{ steps.run-kapi.outputs.plan-tm-exact }}
+    description: "Deprecated: use `plan-memory-exact`, which holds the same value"
+    value: ${{ steps.run-kapi.outputs.plan-memory-exact }}
   plan-ai-remaining:
     description: "With `plan: true`: units left for AI translation"
     value: ${{ steps.run-kapi.outputs.plan-ai-remaining }}
@@ -146,28 +150,30 @@ runs:
           printf 'Running:'; printf ' %q' "${cmd[@]}"; echo
           "${cmd[@]}" > "${RUNNER_TEMP}/kapi-plan.json"
           MISSING=$(jq -r '.totals.missingTarget // 0' "${RUNNER_TEMP}/kapi-plan.json")
-          TM=$(jq -r '.totals.tmExact // 0' "${RUNNER_TEMP}/kapi-plan.json")
+          # kapi 1.3 names the exact content-memory count memoryExact; kapi 1.2
+          # wrote the same number as tmExact.
+          MEMORY=$(jq -r '.totals.memoryExact // .totals.tmExact // 0' "${RUNNER_TEMP}/kapi-plan.json")
           AI=$(jq -r '.totals.aiRemaining // 0' "${RUNNER_TEMP}/kapi-plan.json")
           TOKENS=$(jq -r '.totals.tokenEstimate // 0' "${RUNNER_TEMP}/kapi-plan.json")
           {
             echo "mode=plan"
             echo "plan-missing=${MISSING}"
-            echo "plan-tm-exact=${TM}"
+            echo "plan-memory-exact=${MEMORY}"
             echo "plan-ai-remaining=${AI}"
             echo "plan-token-estimate=${TOKENS}"
           } >> "$GITHUB_OUTPUT"
           {
             echo "## kapi up — plan"
             echo
-            echo "This change leaves **${MISSING} unit(s)** of pending translation work: ${TM} recoverable from TM, ${AI} for AI (~${TOKENS} tokens estimated)."
+            echo "This change leaves **${MISSING} unit(s)** of pending translation work: ${MEMORY} recoverable from content memory, ${AI} for AI (~${TOKENS} tokens estimated)."
             echo
-            echo "| Locale | Pending | TM exact | AI remaining | Token estimate |"
+            echo "| Locale | Pending | Content memory exact | AI remaining | Token estimate |"
             echo "|---|---|---|---|---|"
-            jq -r '.scopes[] | "| \(.locale) | \(.missingTarget) | \(.tmExact) | \(.aiRemaining) | \(.tokenEstimate) |"' "${RUNNER_TEMP}/kapi-plan.json"
+            jq -r '.scopes[] | "| \(.locale) | \(.missingTarget) | \(.memoryExact // .tmExact // 0) | \(.aiRemaining) | \(.tokenEstimate) |"' "${RUNNER_TEMP}/kapi-plan.json"
             echo
             echo "_Estimate is source-chars/4; no provider calls were made._"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "Plan: ${MISSING} unit(s) pending, ${TM} from TM, ${AI} for AI (~${TOKENS} tokens)."
+          echo "Plan: ${MISSING} unit(s) pending, ${MEMORY} from content memory, ${AI} for AI (~${TOKENS} tokens)."
           exit 0
         fi
 
@@ -426,7 +432,7 @@ runs:
         CAUSE: ${{ steps.run-kapi.outputs.did-not-run-cause }}
         DID_NOT_RUN_SUMMARY: ${{ steps.run-kapi.outputs.did-not-run-summary }}
         PLAN_MISSING: ${{ steps.run-kapi.outputs.plan-missing }}
-        PLAN_TM: ${{ steps.run-kapi.outputs.plan-tm-exact }}
+        PLAN_MEMORY: ${{ steps.run-kapi.outputs.plan-memory-exact }}
         PLAN_AI: ${{ steps.run-kapi.outputs.plan-ai-remaining }}
         PLAN_TOKENS: ${{ steps.run-kapi.outputs.plan-token-estimate }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -435,13 +441,13 @@ runs:
         MARKER="<!-- kapi-report -->"
 
         if [ "$MODE" = "plan" ]; then
-          TABLE=$(jq -r '.scopes[] | "| \(.locale) | \(.missingTarget) | \(.tmExact) | \(.aiRemaining) | \(.tokenEstimate) |"' "${RUNNER_TEMP}/kapi-plan.json" 2>/dev/null || true)
+          TABLE=$(jq -r '.scopes[] | "| \(.locale) | \(.missingTarget) | \(.memoryExact // .tmExact // 0) | \(.aiRemaining) | \(.tokenEstimate) |"' "${RUNNER_TEMP}/kapi-plan.json" 2>/dev/null || true)
           BODY="${MARKER}
         ## kapi up — plan
 
-        This change leaves **${PLAN_MISSING:-0} unit(s)** of pending translation work: ${PLAN_TM:-0} recoverable from TM, ${PLAN_AI:-0} for AI (~${PLAN_TOKENS:-0} tokens estimated).
+        This change leaves **${PLAN_MISSING:-0} unit(s)** of pending translation work: ${PLAN_MEMORY:-0} recoverable from content memory, ${PLAN_AI:-0} for AI (~${PLAN_TOKENS:-0} tokens estimated).
 
-        | Locale | Pending | TM exact | AI remaining | Token estimate |
+        | Locale | Pending | Content memory exact | AI remaining | Token estimate |
         |---|---|---|---|---|
         ${TABLE}
 
