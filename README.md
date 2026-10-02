@@ -1,6 +1,6 @@
 # Kapi Action
 
-A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) commands — catch up translations, gate content quality, plan cost — and delivers the results — as a commit, a pull request, or a report on the PR that caused the work.
+A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) commands that bring a project's content and its translations up to date, gate content quality and plan the cost of a change. It reports what changed to a delivery step you own (a commit or a pull request), and can post a report on the pull request that caused the work.
 
 ## Prerequisites
 
@@ -67,9 +67,9 @@ Parked is the interesting one: partial progress is real progress, so the default
 
 `kapi up` treats the recipe as the desired state — the languages the project targets, and the ship gates that define *shippable* — and reconciles the content toward it. Each pass, for every language behind its gate:
 
-1. **Reuse** — exact translation-memory matches fill first, for free.
-2. **Translate** — the configured AI provider fills what remains, with the project's terminology and brand context.
-3. **Check** — deterministic checks run over what was produced (placeholder integrity, inline tags, do-not-translate terms, untranslated text). A unit with a failing finding counts as *drafted*, not translated — it cannot clear a gate until fixed.
+1. **Reuse**: exact content-memory matches fill first, for free.
+2. **Translate**: the configured AI provider fills what remains, with the project's terminology and voice context.
+3. **Check**: deterministic checks run over what was produced (placeholder integrity, inline tags, do-not-translate terms, untranslated text). A unit with a failing finding still counts as *translated*, and the finding holds its locale out of shipping until it is fixed.
 
 Passes repeat until every language clears its gate, a pass makes no progress, or the pass cap is reached.
 
@@ -82,11 +82,11 @@ flowchart LR
     U --> PASS
     CK -->|every gate met| CV["up to date<br/>changes ready to deliver"]
     CK -->|needs a person| PK["parked<br/>the review queue"]
-    PK --> RV["review & approve<br/>committed under .kapi/state"]
+    PK --> RV["review & approve<br/>recorded in the project's context"]
     RV -.->|next run sees it| U
 ```
 
-**Parked work is the review queue, not an error.** What the machine couldn't decide waits for a person: review the wording, approve or fix it, and `kapi commit` records the decision under `.kapi/state/`, or the connected server records it. Approvals raise the `reviewed` coverage the ship gate measures, so the next run and the next gate see them. `kapi check --ship` (see [Gate pull requests](#gate-pull-requests-on-content-quality)) is what enforces the bar at release time.
+**Parked work is the review queue, not an error.** What the machine couldn't decide waits for a person: review the wording, approve or fix it, and the approval is recorded in the project's context (with `kapi apply` or the Review page of Kapi Desktop), or the connected server records it. Push it with `kapi context push`, and a run with `context-sync` takes it in. Approvals raise the `established` coverage the ship gate measures, so the next run and the next gate see them. `kapi check --ship` (see [Gate pull requests](#gate-pull-requests-on-content-quality)) is what enforces the bar at release time.
 
 The kapi up report (outcome, passes, parked locales) is always written to the job summary. Under the hood the Action runs `kapi up --json`, an NDJSON stream — one convergence event per line, closed by a single `{"type":"result", ...}` record. That record is the contract; the events are the log. It becomes the `outcome`, `passes`, and `parked-locales` outputs.
 

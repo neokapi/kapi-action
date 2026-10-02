@@ -1,5 +1,5 @@
 name: "Kapi Run"
-description: "Run kapi commands — catch up translations, gate content quality, plan cost — and report what changed. Delivery (commit, push, PR) is your workflow's own step"
+description: "Run kapi commands that bring a project's content and its translations up to date, gate content quality and plan cost, and report what changed. Delivery (commit, push, PR) is your workflow's own step"
 branding:
   icon: "refresh-cw"
   color: "blue"
@@ -203,7 +203,7 @@ runs:
             {
               echo "## kapi check"
               echo
-              echo "❌ **Gate: unmet** — a brand, terminology, QA, or coverage gate failed. See the findings in the job log."
+              echo "❌ **Gate: unmet**. A voice, terminology, QA or coverage gate failed. See the findings in the job log."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error::kapi gate unmet (exit 3) — content quality gates failed; read the findings and fix them. This is 'not on-spec yet', not a crash."
             exit 3
@@ -386,7 +386,7 @@ runs:
         if [ -z "$PATHS" ]; then
           # No paths specified — check the entire working tree. `kapi init`
           # gitignores the .kapi/ state directory, so what shows up here is the
-          # localized content the run produced, including brand-new locale files
+          # target-language content the run produced, including brand-new locale files
           # (which a tracked-files-only diff would miss).
           DIRT="$(git status --porcelain)"
         else
