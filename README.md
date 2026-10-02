@@ -1,6 +1,6 @@
 # Kapi Action
 
-A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) commands — catch up translations, gate content quality, plan cost — and delivers the results — as a commit, a pull request, or a report on the PR that caused the work.
+A GitHub Action that runs [kapi](https://github.com/neokapi/neokapi) commands that bring a project's content and its translations up to date, gate content quality and plan the cost of a change. It reports what changed to a delivery step you own (a commit or a pull request), and can post a report on the pull request that caused the work.
 
 ## Prerequisites
 
@@ -67,9 +67,9 @@ Parked is the interesting one: partial progress is real progress, so the default
 
 `kapi up` treats the recipe as the desired state — the languages the project targets, and the ship gates that define *shippable* — and reconciles the content toward it. Each pass, for every language behind its gate:
 
-1. **Reuse** — exact translation-memory matches fill first, for free.
-2. **Translate** — the configured AI provider fills what remains, with the project's terminology and brand context.
-3. **Check** — deterministic checks run over what was produced (placeholder integrity, inline tags, do-not-translate terms, untranslated text). A unit with a failing finding counts as *drafted*, not translated — it cannot clear a gate until fixed.
+1. **Reuse**: exact content-memory matches fill first, for free.
+2. **Translate**: the configured AI provider fills what remains, with the project's terminology and voice context.
+3. **Check**: deterministic checks run over what was produced (placeholder integrity, inline tags, do-not-translate terms, untranslated text). A unit with a failing finding still counts as *translated*, and the finding holds its locale out of shipping until it is fixed.
 
 Passes repeat until every language clears its gate, a pass makes no progress, or the pass cap is reached.
 
@@ -77,16 +77,16 @@ Passes repeat until every language clears its gate, a pass makes no progress, or
 flowchart LR
     S[source changes] --> U[kapi up]
     subgraph PASS ["each pass, per language behind its gate"]
-        TM["1 · reuse<br/>TM exact matches"] --> AI["2 · translate<br/>AI + terminology"] --> CK["3 · check<br/>placeholders · terms · tags"]
+        MEM["1 · reuse<br/>content memory exact matches"] --> AI["2 · translate<br/>AI + terminology"] --> CK["3 · check<br/>placeholders · terms · tags"]
     end
     U --> PASS
     CK -->|every gate met| CV["up to date<br/>changes ready to deliver"]
     CK -->|needs a person| PK["parked<br/>the review queue"]
-    PK --> RV["review & approve<br/>committed under .kapi/state"]
+    PK --> RV["review & approve<br/>recorded in the project's context"]
     RV -.->|next run sees it| U
 ```
 
-**Parked work is the review queue, not an error.** What the machine couldn't decide waits for a person: review the wording, approve or fix it, and `kapi commit` records the decision under `.kapi/state/`, or the connected server records it. Approvals raise the `reviewed` coverage the ship gate measures, so the next run and the next gate see them. `kapi check --ship` (see [Gate pull requests](#gate-pull-requests-on-content-quality)) is what enforces the bar at release time.
+**Parked work is the review queue, not an error.** What the machine couldn't decide waits for a person: review the wording, approve or fix it, and the approval is recorded in the project's context (with `kapi apply` or the Review page of Kapi Desktop), or the connected server records it. Push it with `kapi context push`, and a run with `context-sync` takes it in. Approvals raise the `established` coverage the ship gate measures, so the next run and the next gate see them. `kapi check --ship` (see [Gate pull requests](#gate-pull-requests-on-content-quality)) is what enforces the bar at release time.
 
 The kapi up report (outcome, passes, parked locales) is always written to the job summary. Under the hood the Action runs `kapi up --json`, an NDJSON stream — one convergence event per line, closed by a single `{"type":"result", ...}` record. That record is the contract; the events are the log. It becomes the `outcome`, `passes`, and `parked-locales` outputs.
 
@@ -134,7 +134,7 @@ App token instead (both delivery actions above accept a `token:` input).
 
 ### Plan mode: the cost of a change, on its PR
 
-`plan: "true"` dry-runs the kapi loop — pending work, TM leverage, and a token estimate, with no writes and no provider calls (so it needs no API keys). With `pr-comment: "true"` on a pull-request event, the plan lands as one sticky comment that re-runs update in place:
+`plan: "true"` dry-runs the kapi loop and reports pending work, content-memory leverage and a token estimate, with no writes and no provider calls (so it needs no API keys). With `pr-comment: "true"` on a pull-request event, the plan lands as one sticky comment that re-runs update in place:
 
 ```yaml
 name: Translation plan
@@ -157,7 +157,7 @@ jobs:
           pr-comment: "true"
 ```
 
-> "This change leaves **42 unit(s)** of pending translation work: 30 recoverable from TM, 12 for AI (~450 tokens estimated)."
+> "This change leaves **42 unit(s)** of pending translation work: 30 recoverable from content memory, 12 for AI (~450 tokens estimated)."
 
 ### Gate pull requests on content quality
 
@@ -287,9 +287,9 @@ context, settles, and pushes the rules it established.
 
 ### Caching
 
-`neokapi/setup-kapi@v1` carries kapi's parse cache (`.kapi/work/cache/docs`) between runs. Its `cache-tm` input is on by default for a project with a `kapi.yaml`, so this Action needs no cache step of its own. Set setup-kapi's `project-dir` when the recipe is not at the repository root.
+`neokapi/setup-kapi@v1` carries kapi's parse cache (`.kapi/work/cache/docs`) between runs. Its `parse-cache` input is on by default for a project with a `kapi.yaml`, so this Action needs no cache step of its own. Older setup-kapi releases name the input `cache-tm`, and newer ones still accept that name with a deprecation warning. Set setup-kapi's `project-dir` when the recipe is not at the repository root.
 
-Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets and review state a run produced, and a restored copy changes what `kapi status`, `kapi check --ship` and `kapi up` report.
+Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets a run produced, and a restored copy changes what `kapi status`, `kapi check --ship` and `kapi up` report.
 
 ## Inputs
 
@@ -298,7 +298,7 @@ Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets an
 | `command` | `up` | Kapi subcommand to execute |
 | `args` | | Additional arguments |
 | `project` | | Path to the `kapi.yaml` recipe (`-p` flag) |
-| `plan` | `false` | With `command: up`: dry run — pending work, TM leverage, token estimate; no writes, no provider calls |
+| `plan` | `false` | With `command: up`: a dry run reporting pending work, content-memory leverage and a token estimate; no writes, no provider calls |
 | `fail-on-parked` | `false` | With `command: up`, fail the workflow when the run parks instead of reporting partial progress |
 | `pr-comment` | `false` | Sticky report comment on pull-request events, including for a failed gate or a check that did not run |
 | `token` | `${{ github.token }}` | Token for the sticky PR comment |
@@ -316,7 +316,8 @@ Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets an
 | `gate` | With `command: check`: `pass` or `fail` (empty when the check did not run or errored) |
 | `result` | With `command: check`: `passed` (exit 0), `failed` (exit 3), `did_not_run` (exit 4), or `error` (any other exit code) |
 | `did-not-run-cause` | With `command: check`, when `result` is `did_not_run`: `checker_invalid`, `nothing_to_check`, `content_not_checked`, or `unknown` |
-| `plan-missing` / `plan-tm-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals |
+| `plan-missing` / `plan-memory-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals; `plan-memory-exact` counts the units recoverable from exact content-memory matches |
+| `plan-tm-exact` | Deprecated: use `plan-memory-exact`, which holds the same value |
 | `has-changes` | Whether the run left changes in the working tree for your delivery step |
 | `changed-files` | Newline-separated paths the run changed |
 
