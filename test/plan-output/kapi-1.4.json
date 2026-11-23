@@ -1,0 +1,33 @@
+{
+  "flow": "default (built-in)",
+  "flow_drafts": true,
+  "flow_calls_provider": true,
+  "scopes": [
+    {
+      "locale": "de",
+      "collection": "app",
+      "missing_target": 3,
+      "memory_exact": 0,
+      "ai_remaining": 3,
+      "token_estimate": 11
+    },
+    {
+      "locale": "fr",
+      "collection": "app",
+      "missing_target": 3,
+      "memory_exact": 0,
+      "ai_remaining": 3,
+      "token_estimate": 11
+    }
+  ],
+  "totals": {
+    "missing_target": 6,
+    "memory_exact": 0,
+    "ai_remaining": 6,
+    "token_estimate": 22
+  },
+  "drift": {
+    "store_missing": true
+  },
+  "note": "content-memory leverage counts exact-hash hits only; token estimate is source chars / 4 for the remaining blocks (no tokenizer, no provider calls)."
+}

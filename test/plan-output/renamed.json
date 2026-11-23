@@ -1,0 +1,19 @@
+{
+  "flow": "default (built-in)",
+  "scopes": [
+    {
+      "locale": "de",
+      "collection": "app",
+      "pending_blocks": 3,
+      "memory_hits": 1,
+      "ai_blocks": 2,
+      "tokens": 7
+    }
+  ],
+  "totals": {
+    "pending_blocks": 3,
+    "memory_hits": 1,
+    "ai_blocks": 2,
+    "tokens": 7
+  }
+}

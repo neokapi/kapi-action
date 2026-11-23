@@ -159,6 +159,8 @@ jobs:
 
 > "This change leaves **42 unit(s)** of pending translation work: 30 recoverable from content memory, 12 for AI (~450 tokens estimated)."
 
+The Action reads the plan kapi 1.2, 1.3 and 1.4 print. When kapi's plan does not report a count under any name the Action knows, the report says "not reported" in its place, the Action prints a warning, and the count's output is empty rather than 0.
+
 ### Gate pull requests on content quality
 
 `command: check` with `--ship` is the release bar: the project's bound gates (voice, terminology, rule-based checks) plus its ship and source coverage gates. An unmet gate exits `3`, which the Action surfaces as a distinct **"gate unmet"** annotation (not a generic failure), as `gate: fail` and as `result: failed`:
@@ -287,9 +289,11 @@ context, settles, and pushes the rules it established.
 
 ### Caching
 
-`neokapi/setup-kapi@v1` carries kapi's parse cache (`.kapi/work/cache/docs`) between runs. Its `parse-cache` input is on by default for a project with a `kapi.yaml`, so this Action needs no cache step of its own. Older setup-kapi releases name the input `cache-tm`, and newer ones still accept that name with a deprecation warning. Set setup-kapi's `project-dir` when the recipe is not at the repository root.
+`neokapi/setup-kapi@v1` keeps kapi's parse cache between runs, so this Action needs no cache step of its own. Its `parse-cache` input is on by default for a project with a `kapi.yaml`. Older setup-kapi releases name the input `cache-tm`, and newer ones still accept that name with a deprecation warning. Set setup-kapi's `project-dir` when the recipe is not at the repository root, and run `actions/checkout` before setup-kapi.
 
-Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets a run produced, and a restored copy changes what `kapi status`, `kapi check --ship` and `kapi up` report.
+setup-kapi finds the parse cache where your kapi keeps it. A kapi that keeps each checkout's state outside the checkout prints that directory with `kapi state path`, and setup-kapi carries its `work/cache/docs`. kapi 1.3 and earlier keep it in the checkout, at `.kapi/work/cache/docs`.
+
+Cache nothing else of kapi's state. The project store holds the targets a run produced, and a restored copy changes what `kapi status`, `kapi check --ship` and `kapi up` report.
 
 ## Inputs
 
@@ -316,7 +320,7 @@ Leave the rest of `.kapi/work/` out of any cache. Its store holds the targets a 
 | `gate` | With `command: check`: `pass` or `fail` (empty when the check did not run or errored) |
 | `result` | With `command: check`: `passed` (exit 0), `failed` (exit 3), `did_not_run` (exit 4), or `error` (any other exit code) |
 | `did-not-run-cause` | With `command: check`, when `result` is `did_not_run`: `checker_invalid`, `nothing_to_check`, `content_not_checked`, or `unknown` |
-| `plan-missing` / `plan-memory-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals; `plan-memory-exact` counts the units recoverable from exact content-memory matches |
+| `plan-missing` / `plan-memory-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals; `plan-memory-exact` counts the units recoverable from exact content-memory matches. Empty when kapi's plan did not report the count |
 | `plan-tm-exact` | Deprecated: use `plan-memory-exact`, which holds the same value |
 | `has-changes` | Whether the run left changes in the working tree for your delivery step |
 | `changed-files` | Newline-separated paths the run changed |

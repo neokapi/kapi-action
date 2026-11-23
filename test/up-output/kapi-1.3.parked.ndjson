@@ -1,0 +1,3 @@
+{"type":"pass_start","pass":1,"maxPasses":5,"pending":["fr","de"]}
+{"type":"pass_done","pass":1,"maxPasses":5,"pending":["fr","de"],"produced":6}
+{"type":"result","flow":"default","passes":2,"converged":false,"locales":[{"locale":"fr","shippable":false,"parked":true},{"locale":"de","shippable":false,"parked":true}],"parkedScopes":[{"locale":"de","collection":"app"},{"locale":"fr","collection":"app"}]}

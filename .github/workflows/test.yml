@@ -23,15 +23,21 @@ env:
   KAPI_VERSION: "1.2.0"
 
 jobs:
+  # Plan mode against each plan shape a release prints: camelCase with
+  # tmExact (1.2), camelCase with memoryExact (1.3), and snake_case (1.4).
   test-plan:
-    name: "up --plan (dry run + outputs)"
+    name: "up --plan (dry run + outputs, kapi ${{ matrix.version }})"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["1.2.0", "1.3.0", "1.4.0-rc5"]
     steps:
       - uses: actions/checkout@v6
 
       - uses: neokapi/setup-kapi@v1
         with:
-          version: ${{ env.KAPI_VERSION }}
+          version: ${{ matrix.version }}
           plugins: ""
 
       - name: Run plan
@@ -46,24 +52,29 @@ jobs:
           MISSING: ${{ steps.plan.outputs.plan-missing }}
           MEMORY: ${{ steps.plan.outputs.plan-memory-exact }}
           MEMORY_DEPRECATED: ${{ steps.plan.outputs.plan-tm-exact }}
+          AI: ${{ steps.plan.outputs.plan-ai-remaining }}
           TOKENS: ${{ steps.plan.outputs.plan-token-estimate }}
         run: |
-          echo "plan: missing=${MISSING} memory=${MEMORY} tokens=${TOKENS}"
+          echo "plan: missing=${MISSING} memory=${MEMORY} ai=${AI} tokens=${TOKENS}"
           test "${MISSING}" -gt 0
+          test "${AI}" -gt 0
           test "${TOKENS}" -gt 0
           test "${MEMORY}" -ge 0
           # plan-tm-exact is the deprecated name of plan-memory-exact.
           test "${MEMORY_DEPRECATED}" = "${MEMORY}"
 
   test-plan-outputs:
-    name: "up --plan outputs for kapi 1.2 and 1.3 (kapi stub)"
+    name: "up --plan and result outputs for kapi 1.2 to 1.4 (kapi stub)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      # kapi 1.3 reports the exact content-memory count as memoryExact, and
-      # kapi 1.2 as tmExact. The harness runs the plan step on each and checks
-      # the outputs, the job summary and the PR comment.
+      # kapi 1.4 prints the plan and the up result record in snake_case
+      # (memory_exact, parked_scopes), kapi 1.3 in camelCase (memoryExact,
+      # parkedScopes), and kapi 1.2 named the content-memory count tmExact.
+      # The harness runs the plan step on each, and on a plan whose counts
+      # carry names the action does not know, and checks the outputs, the job
+      # summary and the PR comment; then it runs the up step on result records.
       - name: Run the plan harness
         run: |
           yq --version
