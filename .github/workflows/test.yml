@@ -80,6 +80,19 @@ jobs:
           yq --version
           test/plan-outputs.sh
 
+  test-changes:
+    name: "has-changes and changed-files (scratch repository)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # A changed file named KAPI_EOF stays inside changed-files, and a kapi
+      # data directory inside the repository is left out with a warning.
+      - name: Run the change-report harness
+        run: |
+          yq --version
+          test/changes.sh
+
   test-check-gate:
     name: "check --ship (exit-3 contract)"
     runs-on: ubuntu-latest

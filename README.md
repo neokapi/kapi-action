@@ -264,14 +264,14 @@ jobs:
   settle:
     runs-on: ubuntu-latest
     env:
-      KAPI_DATA_DIR: ${{ github.workspace }}/.kapi-data
+      KAPI_DATA_DIR: ${{ runner.temp }}/kapi-data
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: actions/cache@v4
         with:
-          path: .kapi-data
+          path: ${{ runner.temp }}/kapi-data
           key: kapi-data-${{ github.run_id }}
           restore-keys: kapi-data-
       - uses: neokapi/setup-kapi@v1
@@ -282,6 +282,11 @@ jobs:
 ```
 
 The pull request is read from the merge commit's subject (`(#412)` or `Merge pull request #412`); pass `--pr` in `args` when it is not there.
+
+Keep the data directory outside the checkout: it holds kapi's workspace and
+must never be committed. When `KAPI_DATA_DIR` names a directory inside the
+repository, the Action leaves it out of `has-changes` and `changed-files` and
+prints a warning.
 
 A project with a context backend can leave out the cache and the data
 directory: set `context-sync: true` on the settle step, and it pulls the
@@ -314,13 +319,13 @@ Cache nothing else of kapi's state. The project store holds the targets a run pr
 | `status` | `success`, `no-changes`, or `failed` (with `command: check`: a failed gate or a check that did not run) |
 | `outcome` | With `command: up`: `converged` or `parked` (a failed run fails the step, so it never reaches an output) |
 | `passes` | With `command: up`: how many reconciliation passes the run took |
-| `parked-locales` | With `command: up`: comma-separated locales still short of their gate |
+| `parked-locales` | With `command: up`: comma-separated locales still short of their gate, each percent-encoded (a locale tag reads as itself) |
 | `gate` | With `command: check`: `pass` or `fail` (empty when the check did not run or errored) |
 | `result` | With `command: check`: `passed` (exit 0), `failed` (exit 3), `did_not_run` (exit 4), or `error` (any other exit code) |
 | `did-not-run-cause` | With `command: check`, when `result` is `did_not_run`: `checker_invalid`, `nothing_to_check`, `content_not_checked`, or `unknown` |
 | `plan-missing` / `plan-memory-exact` / `plan-ai-remaining` / `plan-token-estimate` | With `plan: true`: the plan totals; `plan-memory-exact` counts the units recoverable from exact content-memory matches. Empty when kapi's plan did not report the count |
 | `plan-tm-exact` | Deprecated: use `plan-memory-exact`, which holds the same value |
-| `has-changes` | Whether the run left changes in the working tree for your delivery step |
+| `has-changes` | Whether the run left changes in the working tree for your delivery step (kapi's data directory excluded) |
 | `changed-files` | Newline-separated paths the run changed |
 
 ## Permissions

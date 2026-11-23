@@ -1,0 +1,18 @@
+{
+  "scopes": [
+    {
+      "locale": "de|ch",
+      "collection": "app\nweb",
+      "missing_target": 3,
+      "memory_exact": 1,
+      "ai_remaining": 2,
+      "token_estimate": 7
+    }
+  ],
+  "totals": {
+    "missing_target": 3,
+    "memory_exact": 1,
+    "ai_remaining": 2,
+    "token_estimate": 7
+  }
+}

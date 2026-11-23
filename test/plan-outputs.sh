@@ -78,7 +78,7 @@ plan_case() {
   fi
 
   contains "$name" "$dir/summary" "$sentence"
-  contains "$name" "$dir/summary" "| Locale | Pending | Content memory exact | AI remaining | Token estimate |"
+  contains "$name" "$dir/summary" "| Locale | Collection | Pending | Content memory exact | AI remaining | Token estimate |"
   local row
   for row in "$@"; do
     contains "$name" "$dir/summary" "$row"
@@ -103,7 +103,7 @@ plan_case() {
     fail "$name comment" "posted no comment"
   else
     contains "$name comment" "$dir/gh/body.md" "$sentence"
-    contains "$name comment" "$dir/gh/body.md" "| Locale | Pending | Content memory exact | AI remaining | Token estimate |"
+    contains "$name comment" "$dir/gh/body.md" "| Locale | Collection | Pending | Content memory exact | AI remaining | Token estimate |"
     for row in "$@"; do
       contains "$name comment" "$dir/gh/body.md" "$row"
     done
@@ -161,16 +161,21 @@ SENTENCE_13="This change leaves **6 unit(s)** of pending translation work: 3 rec
 
 plan_case kapi-1.4 kapi-1.4.json 6 0 6 22 \
   "This change leaves **6 unit(s)** of pending translation work: 0 recoverable from content memory, 6 for AI (~22 tokens estimated)." \
-  "| de | 3 | 0 | 3 | 11 |" "| fr | 3 | 0 | 3 | 11 |"
-plan_case kapi-1.3 kapi-1.3.json 6 3 3 11 "$SENTENCE_13" "| de | 3 | 1 | 2 | 7 |" "| fr | 3 | 2 | 1 | 4 |"
-plan_case kapi-1.2 kapi-1.2.json 6 3 3 11 "$SENTENCE_13" "| de | 3 | 1 | 2 | 7 |" "| fr | 3 | 2 | 1 | 4 |"
+  "| de | app | 3 | 0 | 3 | 11 |" "| fr | app | 3 | 0 | 3 | 11 |"
+plan_case kapi-1.3 kapi-1.3.json 6 3 3 11 "$SENTENCE_13" "| de | app | 3 | 1 | 2 | 7 |" "| fr | app | 3 | 2 | 1 | 4 |"
+plan_case kapi-1.2 kapi-1.2.json 6 3 3 11 "$SENTENCE_13" "| de | app | 3 | 1 | 2 | 7 |" "| fr | app | 3 | 2 | 1 | 4 |"
 plan_case renamed renamed.json "" "" "" "" \
   "kapi's plan did not report: pending units, content-memory matches, AI remaining, token estimate. The table shows what it did report." \
-  "| de | not reported | not reported | not reported | not reported |"
+  "| de | app | not reported | not reported | not reported | not reported |"
+
+plan_case escaped escaped.json 3 1 2 7 \
+  "This change leaves **3 unit(s)** of pending translation work: 1 recoverable from content memory, 2 for AI (~7 tokens estimated)." \
+  "| de\\|ch | app web | 3 | 1 | 2 | 7 |"
 
 result_case up-kapi-1.4-parked kapi-1.4.parked.ndjson parked 1 de,fr
 result_case up-kapi-1.4-converged kapi-1.4.converged.ndjson converged 1 ""
 result_case up-kapi-1.3-parked kapi-1.3.parked.ndjson parked 2 de,fr
+result_case up-escaped escaped.parked.ndjson parked 1 "de,x%0Aplan-missing%3D9,y%7Cz"
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures assertion(s) failed"
