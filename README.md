@@ -294,7 +294,7 @@ context, settles, and pushes the rules it established.
 
 ### Caching
 
-`neokapi/setup-kapi@v1` keeps kapi's parse cache between runs, so a later run replays files it already parsed and this Action needs no cache step of its own. Its `parse-cache` input is on by default for a project with a `kapi.yaml`. Older setup-kapi releases name the input `cache-tm`, and newer ones still accept that name with a deprecation warning. Set setup-kapi's `project-dir` when the recipe is not at the repository root. To carry the cache yourself, set `KAPI_PARSE_CACHE_DIR` to a fixed directory and cache that directory (kapi 1.3 and earlier keep the parse cache in the checkout, at `.kapi/work/cache/docs`).
+`neokapi/setup-kapi@v1` keeps kapi's parse cache between runs, so a later run replays files it already parsed and this Action needs no cache step of its own. Its `parse-cache` input is on by default for a project with a `kapi.yaml`. Older setup-kapi releases name the input `cache-tm`, and newer ones still accept that name with a deprecation warning. Set setup-kapi's `project-dir` when the recipe is not at the repository root. To carry the cache yourself, set `KAPI_PARSE_CACHE_DIR` to a fixed absolute directory outside the project, let kapi create it, and cache that directory; kapi stops with an error when the directory is inside the project, is a link, belongs to another user, or gives group or other users any access (kapi 1.3 and earlier keep the parse cache in the checkout, at `.kapi/work/cache/docs`).
 
 Cache nothing else of kapi's state. The project store holds the targets a run produced, and a restored copy changes what `kapi status`, `kapi check --ship` and `kapi up` report.
 
