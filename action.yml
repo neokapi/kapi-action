@@ -1,5 +1,5 @@
 name: "Kapi Run"
-description: "Run kapi commands — catch up translations, gate content quality, plan cost — and report what changed. Delivery (commit, push, PR) is your workflow's own step"
+description: "Run kapi commands that bring a project's content and its translations up to date, gate content quality and plan cost, and report what changed. Delivery (commit, push, PR) is your workflow's own step"
 branding:
   icon: "refresh-cw"
   color: "blue"
@@ -19,8 +19,9 @@ inputs:
     default: ""
   plan:
     description: >-
-      With `command: up`, dry-run instead: report pending work, TM leverage,
-      and a token estimate without writing anything or calling a provider.
+      With `command: up`, dry-run instead: report pending work, content-memory
+      leverage, and a token estimate without writing anything or calling a
+      provider.
       Pairs with `pr-comment` to post the cost of a change on its PR.
     required: false
     default: "false"
@@ -69,7 +70,7 @@ outputs:
     description: "With `command: up`: how many reconciliation passes the run took"
     value: ${{ steps.run-kapi.outputs.passes }}
   parked-locales:
-    description: "With `command: up`: comma-separated locales still short of their gate"
+    description: "With `command: up`: comma-separated locales still short of their gate, each percent-encoded"
     value: ${{ steps.run-kapi.outputs.parked-locales }}
   gate:
     description: "With `command: check`: `pass` or `fail` (empty when the check did not run or errored)"
@@ -85,16 +86,19 @@ outputs:
       output named no cause
     value: ${{ steps.run-kapi.outputs.did-not-run-cause }}
   plan-missing:
-    description: "With `plan: true`: pending units across all locales"
+    description: "With `plan: true`: pending units across all locales (empty when kapi's plan did not report it)"
     value: ${{ steps.run-kapi.outputs.plan-missing }}
+  plan-memory-exact:
+    description: "With `plan: true`: units recoverable from exact content-memory matches (empty when kapi's plan did not report it)"
+    value: ${{ steps.run-kapi.outputs.plan-memory-exact }}
   plan-tm-exact:
-    description: "With `plan: true`: units recoverable from TM exact hits"
-    value: ${{ steps.run-kapi.outputs.plan-tm-exact }}
+    description: "Deprecated: use `plan-memory-exact`, which holds the same value"
+    value: ${{ steps.run-kapi.outputs.plan-memory-exact }}
   plan-ai-remaining:
-    description: "With `plan: true`: units left for AI translation"
+    description: "With `plan: true`: units left for AI translation (empty when kapi's plan did not report it)"
     value: ${{ steps.run-kapi.outputs.plan-ai-remaining }}
   plan-token-estimate:
-    description: "With `plan: true`: estimated tokens for the remaining units"
+    description: "With `plan: true`: estimated tokens for the remaining units (empty when kapi's plan did not report it)"
     value: ${{ steps.run-kapi.outputs.plan-token-estimate }}
   has-changes:
     description: "Whether the run left changes in the working tree for your delivery step"
@@ -144,30 +148,70 @@ runs:
         if [ "$COMMAND" = "up" ] && [ "$PLAN" = "true" ]; then
           cmd+=(--plan --json)
           printf 'Running:'; printf ' %q' "${cmd[@]}"; echo
-          "${cmd[@]}" > "${RUNNER_TEMP}/kapi-plan.json"
-          MISSING=$(jq -r '.totals.missingTarget // 0' "${RUNNER_TEMP}/kapi-plan.json")
-          TM=$(jq -r '.totals.tmExact // 0' "${RUNNER_TEMP}/kapi-plan.json")
-          AI=$(jq -r '.totals.aiRemaining // 0' "${RUNNER_TEMP}/kapi-plan.json")
-          TOKENS=$(jq -r '.totals.tokenEstimate // 0' "${RUNNER_TEMP}/kapi-plan.json")
+          PLAN_JSON="${RUNNER_TEMP}/kapi-plan.json"
+          "${cmd[@]}" > "$PLAN_JSON"
+          # Each count is read under every name a kapi release has given it:
+          # snake_case (kapi 1.4 and later), camelCase (1.3), and tmExact for
+          # the content-memory count (1.2). A count missing under every name
+          # reads as empty, never as 0, so a renamed field shows up as "not
+          # reported" rather than as no work.
+          JQ_DEFS='
+            def pick(names): [names as $n | .[$n] | numbers] | .[0];
+            def missing: pick("missing_target", "missingTarget");
+            def memory: pick("memory_exact", "memoryExact", "tmExact");
+            def ai: pick("ai_remaining", "aiRemaining");
+            def tokens: pick("token_estimate", "tokenEstimate");
+            def cell(f): f // "not reported";
+            def esc: tostring | gsub("[\\r\\n]+"; " ") | gsub("\\|"; "\\|");
+          '
+          total() {
+            jq -r "${JQ_DEFS} .totals | $1 // empty" "$PLAN_JSON"
+          }
+          MISSING="$(total missing)"
+          MEMORY="$(total memory)"
+          AI="$(total ai)"
+          TOKENS="$(total tokens)"
+          UNREPORTED=()
+          [ -n "$MISSING" ] || UNREPORTED+=("pending units")
+          [ -n "$MEMORY" ] || UNREPORTED+=("content-memory matches")
+          [ -n "$AI" ] || UNREPORTED+=("AI remaining")
+          [ -n "$TOKENS" ] || UNREPORTED+=("token estimate")
           {
             echo "mode=plan"
             echo "plan-missing=${MISSING}"
-            echo "plan-tm-exact=${TM}"
+            echo "plan-memory-exact=${MEMORY}"
             echo "plan-ai-remaining=${AI}"
             echo "plan-token-estimate=${TOKENS}"
           } >> "$GITHUB_OUTPUT"
+
+          # The report is written once and used by the job summary and the
+          # sticky PR comment alike.
+          REPORT="${RUNNER_TEMP}/kapi-plan-report.md"
+          {
+            if [ "${#UNREPORTED[@]}" -eq 0 ]; then
+              echo "This change leaves **${MISSING} unit(s)** of pending translation work: ${MEMORY} recoverable from content memory, ${AI} for AI (~${TOKENS} tokens estimated)."
+            else
+              LIST="$(printf '%s, ' "${UNREPORTED[@]}")"
+              LIST="${LIST%, }"
+              echo "kapi's plan did not report: ${LIST}. The table shows what it did report."
+            fi
+            echo
+            echo "| Locale | Collection | Pending | Content memory exact | AI remaining | Token estimate |"
+            echo "|---|---|---|---|---|---|"
+            jq -r "${JQ_DEFS}"' .scopes[]? | "| \(.locale // "not reported" | esc) | \(.collection // "" | esc) | \(cell(missing)) | \(cell(memory)) | \(cell(ai)) | \(cell(tokens)) |"' "$PLAN_JSON"
+          } > "$REPORT"
           {
             echo "## kapi up — plan"
             echo
-            echo "This change leaves **${MISSING} unit(s)** of pending translation work: ${TM} recoverable from TM, ${AI} for AI (~${TOKENS} tokens estimated)."
-            echo
-            echo "| Locale | Pending | TM exact | AI remaining | Token estimate |"
-            echo "|---|---|---|---|---|"
-            jq -r '.scopes[] | "| \(.locale) | \(.missingTarget) | \(.tmExact) | \(.aiRemaining) | \(.tokenEstimate) |"' "${RUNNER_TEMP}/kapi-plan.json"
+            cat "$REPORT"
             echo
             echo "_Estimate is source-chars/4; no provider calls were made._"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "Plan: ${MISSING} unit(s) pending, ${TM} from TM, ${AI} for AI (~${TOKENS} tokens)."
+          if [ "${#UNREPORTED[@]}" -eq 0 ]; then
+            echo "Plan: ${MISSING} unit(s) pending, ${MEMORY} from content memory, ${AI} for AI (~${TOKENS} tokens)."
+          else
+            echo "::warning::kapi's plan did not report: ${LIST}. This version of the action may not know the name kapi now gives these counts, so their outputs are empty."
+          fi
           exit 0
         fi
 
@@ -197,7 +241,7 @@ runs:
             {
               echo "## kapi check"
               echo
-              echo "❌ **Gate: unmet** — a brand, terminology, QA, or coverage gate failed. See the findings in the job log."
+              echo "❌ **Gate: unmet**. A voice, terminology, QA or coverage gate failed. See the findings in the job log."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::error::kapi gate unmet (exit 3) — content quality gates failed; read the findings and fix them. This is 'not on-spec yet', not a crash."
             exit 3
@@ -317,7 +361,11 @@ runs:
 
         CONVERGED="$(jq -r '.converged // false' <<< "$RESULT")"
         PASSES="$(jq -r '.passes // 0' <<< "$RESULT")"
-        PARKED="$(jq -r '[.parkedScopes[]?.locale] | unique | join(",")' <<< "$RESULT")"
+        # kapi 1.4 and later name the list parked_scopes; kapi 1.3 parkedScopes.
+        # Each locale is percent-encoded (@uri), which leaves a locale tag as
+        # it is and keeps a comma, a "|" or a line break in a name from
+        # breaking the output, the summary table or an annotation.
+        PARKED="$(jq -r '[(.parked_scopes // .parkedScopes // [])[]?.locale | strings | @uri] | unique | join(",")' <<< "$RESULT")"
 
         if [ "$CONVERGED" = "true" ]; then
           OUTCOME="converged"
@@ -377,12 +425,47 @@ runs:
         PATHS: ${{ inputs.paths }}
       run: |
         set -euo pipefail
+        # kapi's data root holds the workspace, and with a newer kapi each
+        # checkout's state, sync state and redaction vault. When a caller
+        # points it inside the repository, it is left out of what this step
+        # reports, so a delivery step never commits it.
+        EXCLUDE=()
+        DATA_ROOT="${KAPI_DATA_DIR:-}"
+        if [ -z "$DATA_ROOT" ] && [ -n "${XDG_DATA_HOME:-}" ]; then
+          DATA_ROOT="${XDG_DATA_HOME%/}/kapi"
+        fi
+        if [ -n "$DATA_ROOT" ]; then
+          TOP="$(git rev-parse --show-toplevel)"
+          TOP_REAL="$(cd "$TOP" && pwd -P)"
+          case "$DATA_ROOT" in
+            /*) ABS="$DATA_ROOT" ;;
+            *) ABS="$(pwd)/$DATA_ROOT" ;;
+          esac
+          # Resolve the deepest existing ancestor, so a root that does not
+          # exist yet is still placed correctly.
+          probe="$ABS"
+          rest=""
+          while [ ! -d "$probe" ] && [ "$probe" != "/" ]; do
+            rest="/$(basename "$probe")${rest}"
+            probe="$(dirname "$probe")"
+          done
+          REAL="$(cd "$probe" && pwd -P)${rest}"
+          case "$REAL/" in
+            "$TOP_REAL"/*)
+              REL="${REAL#"$TOP_REAL"/}"
+              if [ -n "$REL" ]; then
+                echo "::warning::kapi's data directory (${DATA_ROOT}) is inside the repository at ${REL}. It is left out of has-changes and changed-files; set KAPI_DATA_DIR to a directory under runner.temp instead."
+                EXCLUDE=(":(top,exclude)${REL}")
+              fi
+              ;;
+          esac
+        fi
         if [ -z "$PATHS" ]; then
           # No paths specified — check the entire working tree. `kapi init`
           # gitignores the .kapi/ state directory, so what shows up here is the
-          # localized content the run produced, including brand-new locale files
+          # target-language content the run produced, including brand-new locale files
           # (which a tracked-files-only diff would miss).
-          DIRT="$(git status --porcelain)"
+          DIRT="$(git status --porcelain -- ${EXCLUDE[@]+"${EXCLUDE[@]}"})"
         else
           EXISTING=()
           # shellcheck disable=SC2086  # deliberate word-splitting over the path list
@@ -395,17 +478,19 @@ runs:
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          DIRT="$(git status --porcelain -- "${EXISTING[@]}")"
+          DIRT="$(git status --porcelain -- "${EXISTING[@]}" ${EXCLUDE[@]+"${EXCLUDE[@]}"})"
         fi
 
         if [ -z "$DIRT" ]; then
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
         else
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          # A delimiter no path can equal: random for every write.
+          DELIM="KAPI_EOF_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
           {
-            echo "changed_files<<KAPI_EOF"
+            echo "changed_files<<${DELIM}"
             awk '{ print substr($0, 4) }' <<< "$DIRT"
-            echo "KAPI_EOF"
+            echo "${DELIM}"
           } >> "$GITHUB_OUTPUT"
         fi
 
@@ -425,25 +510,18 @@ runs:
         RESULT: ${{ steps.run-kapi.outputs.result }}
         CAUSE: ${{ steps.run-kapi.outputs.did-not-run-cause }}
         DID_NOT_RUN_SUMMARY: ${{ steps.run-kapi.outputs.did-not-run-summary }}
-        PLAN_MISSING: ${{ steps.run-kapi.outputs.plan-missing }}
-        PLAN_TM: ${{ steps.run-kapi.outputs.plan-tm-exact }}
-        PLAN_AI: ${{ steps.run-kapi.outputs.plan-ai-remaining }}
-        PLAN_TOKENS: ${{ steps.run-kapi.outputs.plan-token-estimate }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
         set -euo pipefail
         MARKER="<!-- kapi-report -->"
 
         if [ "$MODE" = "plan" ]; then
-          TABLE=$(jq -r '.scopes[] | "| \(.locale) | \(.missingTarget) | \(.tmExact) | \(.aiRemaining) | \(.tokenEstimate) |"' "${RUNNER_TEMP}/kapi-plan.json" 2>/dev/null || true)
+          # The plan step wrote the report the job summary shows.
+          REPORT="$(cat "${RUNNER_TEMP}/kapi-plan-report.md" 2>/dev/null || true)"
           BODY="${MARKER}
         ## kapi up — plan
 
-        This change leaves **${PLAN_MISSING:-0} unit(s)** of pending translation work: ${PLAN_TM:-0} recoverable from TM, ${PLAN_AI:-0} for AI (~${PLAN_TOKENS:-0} tokens estimated).
-
-        | Locale | Pending | TM exact | AI remaining | Token estimate |
-        |---|---|---|---|---|
-        ${TABLE}
+        ${REPORT}
 
         _[Run](${RUN_URL}) · estimate is source-chars/4, no provider calls._"
         elif [ -n "$GATE" ]; then

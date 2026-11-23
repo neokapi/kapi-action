@@ -1,0 +1,9 @@
+{"type":"log","stage":"settle_source","settled_source":3,"message":"Settled source: 3 translatable block(s), 0 held below translate_after \"written\"."}
+{"type":"pass_start","pass":1,"max_passes":1,"pending":["fr","de"]}
+{"type":"locale_start","pass":1,"locale":"de","units":3}
+{"type":"locale_start","pass":1,"locale":"fr","units":3}
+{"type":"locale_done","pass":1,"locale":"de","units":3}
+{"type":"locale_done","pass":1,"locale":"fr","units":3}
+{"type":"pass_done","stage":"checks","pass":1,"max_passes":1,"pending":["fr","de"],"produced":6,"produced_delta":6,"failing_checks":6}
+{"type":"done","state":"parked"}
+{"type":"result","flow":"recycle","passes":1,"converged":false,"locales":[{"locale":"fr","shippable":false,"parked":true,"pct":{"draft":100,"translated":100},"ship_state":"withheld","gated":false,"failing_checks":3},{"locale":"de","shippable":false,"parked":true,"pct":{"draft":100,"translated":100},"ship_state":"withheld","gated":false,"failing_checks":3}],"parked_scopes":[{"locale":"de","collection":"app"},{"locale":"fr","collection":"app"}],"translate_after":"written"}

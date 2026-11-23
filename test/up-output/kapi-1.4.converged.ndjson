@@ -1,0 +1,3 @@
+{"type":"pass_start","pass":1,"max_passes":5,"pending":["fr","de"]}
+{"type":"done","state":"converged"}
+{"type":"result","flow":"default (built-in)","passes":1,"converged":true,"locales":[{"locale":"fr","shippable":true,"ship_state":"shippable","gated":true},{"locale":"de","shippable":true,"ship_state":"shippable","gated":true}],"produced":6}
